@@ -6,6 +6,17 @@ from .base_depth_dataset import \
     BaseDepthDataset, DepthFileNameMode, DatasetMode
 
 
+class WeatherOption:
+    def __init__(self):
+        self.fog_path_1 = ('fog', '75m')
+        self.fog_path_2 = ('fog', '150m')
+        self.rain_path = ('mix_rain', '50mm')
+        self.snow_path = ('mix_snow', 'data')
+        self.raingan_path = ('raingan', 'data')
+        self.snowgan_path = ('snowgan', 'data')
+        self.num_domains = 6
+        
+
 class WeathewrKITTIDepthDataset(BaseDepthDataset):
     def __init__(
         self,
@@ -19,9 +30,9 @@ class WeathewrKITTIDepthDataset(BaseDepthDataset):
             max_depth=80,
             has_filled_depth=False,
             name_mode=DepthFileNameMode.id,
-            **kwargs,
-        )
+            **kwargs,)
         
+        self.weather_opt = WeatherOption()
         self.rgb_path = 'rgb'
         self.depth_path = 'depth'
         
@@ -32,12 +43,40 @@ class WeathewrKITTIDepthDataset(BaseDepthDataset):
             "garg",   # set evaluation mask according to Garg ECCV16
             "eigen",  # set evaluation mask according to Eigen NIPS14
         ], f"Unknown crop type: {self.valid_mask_crop}"
-
         # Filter out empty depth
         self.filenames = [f for f in self.filenames if "None" != f[1]]
 
-    def __getitem__(self, index):
-        return super().__getitem__(index)
+        self.rgb_files = [os.path.join(self.rgb_path, filename_line[0][11:])
+                          for filename_line in self.filenames]
+        self.depth_files = [os.path.join(self.depth_path, filename_line[1])
+                          for filename_line in self.filenames] * (self.weather_opt.num_domains + 1)
+        self.filled = [os.path.join(self.depth_path, filename_line[2])
+                          for filename_line in self.filenames] * (self.weather_opt.num_domains + 1)
+        
+        self.rain_files = [os.path.join(self.weather_opt.rain_path[0], 
+                                        filename_line[0][11:].replace('data', self.weather_opt.rain_path[1]))
+                            for filename_line in self.filenames]
+        self.raingan_files = [os.path.join(self.weather_opt.raingan_path[0], 
+                                        filename_line[0][11:].replace('data', self.weather_opt.raingan_path[1]))
+                            for filename_line in self.filenames]
+        self.fog1_files = [os.path.join(self.weather_opt.fog_path_1[0], 
+                                        filename_line[0][11:].replace('data', self.weather_opt.fog_path_1[1]))
+                            for filename_line in self.filenames]
+        self.fog2_files = [os.path.join(self.weather_opt.fog_path_2[0], 
+                                        filename_line[0][11:].replace('data', self.weather_opt.fog_path_2[1]))
+                            for filename_line in self.filenames]
+        self.snow_files = [os.path.join(self.weather_opt.snow_path[0], 
+                                        filename_line[0][11:].replace('data', self.weather_opt.snow_path[1]))
+                          for filename_line in self.filenames]
+        self.snowgan_files = [os.path.join(self.weather_opt.snowgan_path[0], 
+                                           filename_line[0][11:].replace('data', self.weather_opt.snowgan_path[1]))
+                          for filename_line in self.filenames]
+        
+    def __len__(self):
+        if self.version == 'mixed':
+            return len(self.filenames) * self.weather_opt.num_domains
+        else:
+            return len(self.filenames)
         
     def _read_depth_file(self, rel_path):
         depth_in = self._read_image(rel_path)
@@ -59,18 +98,19 @@ class WeathewrKITTIDepthDataset(BaseDepthDataset):
             }
         return depth_data
     
-    def _get_data_path(self, index):
-        filename_line = self.filenames[index]
-        # Get data path
-        rgb_rel_path = self.rgb_path + filename_line[0][11:] # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
-        depth_rel_path, filled_rel_path = None, None
+    # def _get_data_path(self, index):
+    #     filename_line = self.filenames[index]
+    #     # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+    #     rgb_rel_path = os.path.join(self.rgb_path, filename_line[0][11:]) 
+    #     depth_rel_path, filled_rel_path = None, None
         
-        if DatasetMode.RGB_ONLY != self.mode:
-            depth_rel_path = self.depth_path + filename_line[1]  # e.g., depth/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
-            if self.has_filled_depth:          
-                filled_rel_path = filename_line[2]  # e.g., 721.5377
-        print(rgb_rel_path, depth_rel_path, filled_rel_path)
-        return rgb_rel_path, depth_rel_path, filled_rel_path
+    #     if DatasetMode.RGB_ONLY != self.mode:
+    #         # e.g., depth/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+    #         depth_rel_path = os.path.join(self.depth_path, filename_line[1])  
+    #         if self.has_filled_depth:          
+    #             filled_rel_path = filename_line[2]  # e.g., 721.5377
+        
+    #     return rgb_rel_path, depth_rel_path, filled_rel_path
     
     @staticmethod
     def kitti_benchmark_crop(input_img):
@@ -125,13 +165,23 @@ class WeathewrKITTIDepthDataset(BaseDepthDataset):
         return valid_mask
 
 
-if __name__ == '__main__':
-    ds = WeathewrKITTIDepthDataset(
-        kitti_bm_crop=True,
-        valid_mask_crop='eigen',
-        dataset_dir='data/kitti',
-        filename_ls_path='data_split/kitti_depth/eigen_test_files_with_gt.txt',
-        disp_name='kitti_depth_eigen_test_full',
-        mode=DatasetMode.RGB_ONLY,
-    )
+class WeathewrKITTIDepthMixedDataset(WeathewrKITTIDepthDataset):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.mix_filenames = self.rgb_files + self.rain_files + self.raingan_files + \
+                                self.fog1_files + self.fog2_files + self.snow_files + self.snowgan_files
+        print(len(self.mix_filenames), len(self.depth_files))
+                  
+    def __len__(self):
+        return len(self.mix_filenames)
     
+    def _get_data_path(self, index):
+        rgb_rel_path = self.mix_filenames[index]
+        # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+        depth_rel_path, filled_rel_path = None, None
+        if DatasetMode.RGB_ONLY != self.mode:
+            # e.g., depth/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+            depth_rel_path = self.depth_files[index]
+            if self.has_filled_depth:          
+                filled_rel_path = self.filled[index]  # e.g., 721.5377
+        return rgb_rel_path, depth_rel_path, filled_rel_path

@@ -53,6 +53,7 @@ from .oasis_dataset import OasisNormalsDataset
 from .scannet_dataset import ScanNetDepthDataset, ScanNetNormalsDataset
 from .sintel_dataset import SintelNormalsDataset
 from .vkitti_dataset import VirtualKITTIDepthDataset
+from .weatherkitti_dataset import WeathewrKITTIDepthMixedDataset
 
 dataset_name_class_dict = {
     "hypersim_depth": HypersimDepthDataset,
@@ -72,11 +73,17 @@ dataset_name_class_dict = {
     "oasis_normals": OasisNormalsDataset,
     "interiorverse_iid": InteriorVerseIIDDataset,
     "hypersim_iid": HypersimIIDDataset,
+    "weather_depth_kitti": WeathewrKITTIDepthMixedDataset,
+    
 }
 
 
 def get_dataset(
-    cfg_data_split, base_data_dir: str, mode: DatasetMode, **kwargs
+    cfg_data_split, 
+    base_data_dir: str,
+    mode: DatasetMode, 
+    join_split=True, 
+    **kwargs
 ) -> Union[
     BaseDepthDataset,
     BaseIIDDataset,
@@ -95,10 +102,11 @@ def get_dataset(
     
     elif cfg_data_split.name in dataset_name_class_dict.keys():
         dataset_class = dataset_name_class_dict[cfg_data_split.name]
+        dataset_dir = os.path.join(base_data_dir, cfg_data_split.dir) if join_split else base_data_dir
         dataset = dataset_class(
             mode=mode,
             filename_ls_path=cfg_data_split.filenames,
-            dataset_dir=os.path.join(base_data_dir, cfg_data_split.dir),
+            dataset_dir=dataset_dir,
             **cfg_data_split,
             **kwargs,
         )

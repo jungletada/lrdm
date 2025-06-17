@@ -35,9 +35,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import argparse
 import logging
-import numpy as np
-import os
 import torch
+import numpy as np
 from omegaconf import OmegaConf
 from tabulate import tabulate
 from torch.utils.data import DataLoader

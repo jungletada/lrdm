@@ -340,11 +340,11 @@ rm -f ${BASE_DATA_DIR}/evaluation_dataset.zip
 For download instructions of the intrinsic image decomposition test data, please refer to [iid-appearance instructions](script/iid/dataset_preprocess/interiorverse_appearance/README.md) and [iid-lighting instructions](script/iid/dataset_preprocess/hypersim_lighting/README.md). 
 
 Run inference and evaluation scripts, for example:
-
+<!-- bash script/depth/eval/11_infer_nyu.sh  # Run inference
+bash script/depth/eval/12_eval_nyu.sh   # Evaluate predictions -->
 ```bash
 # Depth
-bash script/depth/eval/11_infer_nyu.sh  # Run inference
-bash script/depth/eval/12_eval_nyu.sh   # Evaluate predictions
+bash script/depth/eval/21_infer_kitti.sh
 ```
 
 ```bash

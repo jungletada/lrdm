@@ -10,7 +10,7 @@ n_ensemble=${3:-10}
 python script/depth/infer.py \
     --checkpoint $ckpt \
     --seed 1234 \
-    --base_data_dir $BASE_DATA_DIR \
+    --base_data_dir data/kitti \
     --denoise_steps 1 \
     --ensemble_size ${n_ensemble} \
     --processing_res 0 \
