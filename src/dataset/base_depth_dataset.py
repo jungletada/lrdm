@@ -27,19 +27,17 @@
 #   https://github.com/prs-eth/Marigold#-citation
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
-
 import io
-import numpy as np
 import os
 import random
 import tarfile
 import torch
+import numpy as np
+from typing import Union
 from PIL import Image
 from enum import Enum
 from torch.utils.data import Dataset
 from torchvision.transforms import InterpolationMode, Resize
-from typing import Union
-
 from src.util.depth_transform import DepthNormalizerBase
 
 
@@ -51,7 +49,6 @@ class DatasetMode(Enum):
 
 class DepthFileNameMode(Enum):
     """Prediction file naming modes"""
-
     id = 1  # id.png
     rgb_id = 2  # rgb_id.png
     i_d_rgb = 3  # i_d_1_rgb.png
@@ -125,9 +122,7 @@ class BaseDepthDataset(Dataset):
 
     def _get_data_item(self, index):
         rgb_rel_path, depth_rel_path, filled_rel_path = self._get_data_path(index=index)
-
         rasters = {}
-
         # RGB data
         rasters.update(self._load_rgb_data(rgb_rel_path=rgb_rel_path))
 
@@ -135,7 +130,8 @@ class BaseDepthDataset(Dataset):
         if DatasetMode.RGB_ONLY != self.mode:
             # load data
             depth_data = self._load_depth_data(
-                depth_rel_path=depth_rel_path, filled_rel_path=filled_rel_path
+                depth_rel_path=depth_rel_path, 
+                filled_rel_path=filled_rel_path
             )
             rasters.update(depth_data)
             # valid mask
@@ -179,10 +175,8 @@ class BaseDepthDataset(Dataset):
 
     def _get_data_path(self, index):
         filename_line = self.filenames[index]
-
         # Get data path
         rgb_rel_path = filename_line[0]
-
         depth_rel_path, filled_rel_path = None, None
         if DatasetMode.RGB_ONLY != self.mode:
             depth_rel_path = filename_line[1]

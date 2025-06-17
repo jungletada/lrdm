@@ -27,16 +27,13 @@
 #   https://github.com/prs-eth/Marigold#-citation
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
-
-import sys
 import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
+import sys
 import argparse
 import logging
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 import numpy as np
-import os
 import torch
 from PIL import Image
 from omegaconf import OmegaConf
@@ -53,9 +50,7 @@ from src.dataset import (
 from src.util.seeding import seed_all
 
 
-if "__main__" == __name__:
-    logging.basicConfig(level=logging.INFO)
-
+def get_args():
     # -------------------- Arguments --------------------
     parser = argparse.ArgumentParser(
         description="Marigold : Monocular Depth Estimation : Dataset Inference"
@@ -125,8 +120,12 @@ if "__main__" == __name__:
         default=None,
         help="Reproducibility seed. Set to `None` for randomized inference. Default: `None`",
     )
+    return parser.parse_args()
 
-    args = parser.parse_args()
+
+if "__main__" == __name__:
+    logging.basicConfig(level=logging.INFO)
+    args = get_args()
 
     checkpoint_path = args.checkpoint
     dataset_config = args.dataset_config
@@ -164,7 +163,6 @@ if "__main__" == __name__:
     # Random seed
     if seed is None:
         import time
-
         seed = int(time.time())
 
     seed_all(seed)
@@ -221,7 +219,8 @@ if "__main__" == __name__:
         variant = None
 
     pipe: MarigoldDepthPipeline = MarigoldDepthPipeline.from_pretrained(
-        checkpoint_path, variant=variant, torch_dtype=dtype
+        checkpoint_path, 
+        variant=variant, torch_dtype=dtype
     )
 
     try:

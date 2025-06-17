@@ -1,38 +1,12 @@
-# Copyright 2023-2025 Marigold Team, ETH Zürich. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 # --------------------------------------------------------------------------
-# More information about Marigold:
-#   https://marigoldmonodepth.github.io
-#   https://marigoldcomputervision.github.io
-# Efficient inference pipelines are now part of diffusers:
-#   https://huggingface.co/docs/diffusers/using-diffusers/marigold_usage
-#   https://huggingface.co/docs/diffusers/api/pipelines/marigold
-# Examples of trained models and live demos:
-#   https://huggingface.co/prs-eth
-# Related projects:
-#   https://rollingdepth.github.io/
-#   https://marigolddepthcompletion.github.io/
-# Citation (BibTeX):
-#   https://github.com/prs-eth/Marigold#-citation
-# If you find Marigold useful, we kindly ask you to cite our papers.
-# --------------------------------------------------------------------------
-
+# Modified from Marigold:
+import os
 import torch
-from .base_depth_dataset import BaseDepthDataset, DepthFileNameMode
+from .base_depth_dataset import \
+    BaseDepthDataset, DepthFileNameMode, DatasetMode
 
 
-class KITTIDepthDataset(BaseDepthDataset):
+class WeathewrKITTIDepthDataset(BaseDepthDataset):
     def __init__(
         self,
         kitti_bm_crop,  # Crop to KITTI benchmark size
@@ -47,6 +21,10 @@ class KITTIDepthDataset(BaseDepthDataset):
             name_mode=DepthFileNameMode.id,
             **kwargs,
         )
+        
+        self.rgb_path = 'rgb'
+        self.depth_path = 'depth'
+        
         self.kitti_bm_crop = kitti_bm_crop
         self.valid_mask_crop = valid_mask_crop
         assert self.valid_mask_crop in [
@@ -58,6 +36,9 @@ class KITTIDepthDataset(BaseDepthDataset):
         # Filter out empty depth
         self.filenames = [f for f in self.filenames if "None" != f[1]]
 
+    def __getitem__(self, index):
+        return super().__getitem__(index)
+        
     def _read_depth_file(self, rel_path):
         depth_in = self._read_image(rel_path)
         # Decode KITTI depth
@@ -77,7 +58,20 @@ class KITTIDepthDataset(BaseDepthDataset):
                 k: self.kitti_benchmark_crop(v) for k, v in depth_data.items()
             }
         return depth_data
-
+    
+    def _get_data_path(self, index):
+        filename_line = self.filenames[index]
+        # Get data path
+        rgb_rel_path = self.rgb_path + filename_line[0][11:] # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+        depth_rel_path, filled_rel_path = None, None
+        
+        if DatasetMode.RGB_ONLY != self.mode:
+            depth_rel_path = self.depth_path + filename_line[1]  # e.g., depth/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+            if self.has_filled_depth:          
+                filled_rel_path = filename_line[2]  # e.g., 721.5377
+        print(rgb_rel_path, depth_rel_path, filled_rel_path)
+        return rgb_rel_path, depth_rel_path, filled_rel_path
+    
     @staticmethod
     def kitti_benchmark_crop(input_img):
         """
@@ -129,3 +123,15 @@ class KITTIDepthDataset(BaseDepthDataset):
             eval_mask.reshape(valid_mask.shape)
             valid_mask = torch.logical_and(valid_mask, eval_mask)
         return valid_mask
+
+
+if __name__ == '__main__':
+    ds = WeathewrKITTIDepthDataset(
+        kitti_bm_crop=True,
+        valid_mask_crop='eigen',
+        dataset_dir='data/kitti',
+        filename_ls_path='data_split/kitti_depth/eigen_test_files_with_gt.txt',
+        disp_name='kitti_depth_eigen_test_full',
+        mode=DatasetMode.RGB_ONLY,
+    )
+    

@@ -3,7 +3,7 @@ set -e
 set -x
 
 # Use specified checkpoint path, otherwise, default value
-ckpt=${1:-"prs-eth/marigold-depth-v1-1"}
+ckpt=${1:-"checkpoint/marigold-depth-v1-1"}
 subfolder=${2:-"eval"}
 n_ensemble=${3:-10}
 
