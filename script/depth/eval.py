@@ -38,10 +38,11 @@ import argparse
 import logging
 import torch
 import numpy as np
+from tqdm.auto import tqdm
 from omegaconf import OmegaConf
 from tabulate import tabulate
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
 
 from src.dataset import (
     DatasetMode,
@@ -209,7 +210,25 @@ if "__main__" == __name__:
         # Evaluate (using CUDA if available)
         sample_metric = []
         depth_pred_ts = torch.from_numpy(depth_pred).to(device)
+        
+        # Save depth_pred_ts and depth_raw_ts as heatmap PNGs
+        def save_heatmap(tensor, filename):
+            arr = tensor.cpu().numpy()
+            plt.figure()
+            plt.axis('off')
+            plt.imshow(arr, cmap='plasma')
+            plt.tight_layout(pad=0)
+            # Ensure the directory exists before saving
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            plt.savefig(filename, bbox_inches='tight', pad_inches=0)
+            plt.close()
 
+        # Save predicted and ground truth depth as heatmaps
+        pred_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_pred_heatmap.png'))
+        gt_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_gt_heatmap.png'))
+        save_heatmap(depth_pred_ts.squeeze(), pred_heatmap_path)
+        save_heatmap(torch.from_numpy(depth_raw).to(device).squeeze(), gt_heatmap_path)
+        
         for met_func in metric_funcs:
             _metric_name = met_func.__name__
             _metric = met_func(depth_pred_ts, depth_raw_ts, valid_mask_ts).item()

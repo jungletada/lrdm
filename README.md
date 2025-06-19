@@ -257,13 +257,12 @@ Alternatively, use the following script to download the checkpoint weights local
 
 ```bash
 bash script/download_weights.sh marigold-depth-v1-1           # depth checkpoint
-bash script/download_weights.sh marigold-normals-v1-1         # normals checkpoint
+```
+<!-- bash script/download_weights.sh marigold-normals-v1-1         # normals checkpoint
 bash script/download_weights.sh marigold-iid-appearance-v1-1  # iid appearance checkpoint
 bash script/download_weights.sh marigold-iid-lighting-v1-1    # iid lighting checkpoint
-# bash script/download_weights.sh marigold-depth-v1-0         # CVPR depth checkpoint
-```
-
-At inference, specify the checkpoint path:
+# bash script/download_weights.sh marigold-depth-v1-0         # CVPR depth checkpoint -->
+<!-- At inference, specify the checkpoint path:
 
 ```bash
 # Depth
@@ -301,7 +300,7 @@ python script/iid/run.py \
     --ensemble_size 1 \
     --input_rgb_dir input/in-the-wild_example \
     --output_dir output/in-the-wild_example
-```
+``` -->
 
 ## 🦿 Evaluation on test datasets <a name="evaluation"></a>
 Install additional dependencies:

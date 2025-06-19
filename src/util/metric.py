@@ -60,7 +60,6 @@ class MetricTracker:
 
 # -------------------- Depth Metrics --------------------
 
-
 def abs_relative_difference(output, target, valid_mask=None):
     actual_output = output
     actual_target = target

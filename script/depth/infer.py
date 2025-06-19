@@ -210,7 +210,7 @@ if "__main__" == __name__:
     assert isinstance(dataset, BaseDepthDataset)
     
     # for i in range(len(dataset)):
-    #     rgb_norm = dataset[i]['rgb_norm']
+    #     rgb_norm = dataset[i]['rgb_int']
     #     depth = dataset[i]['depth_raw_linear']
     #     print(f"index {i}: {rgb_norm.shape}, {depth.shape}")
 
@@ -241,7 +241,8 @@ if "__main__" == __name__:
 
     pipe: MarigoldDepthPipeline = MarigoldDepthPipeline.from_pretrained(
         checkpoint_path, 
-        variant=variant, torch_dtype=dtype
+        variant=variant, 
+        torch_dtype=dtype,
     )
 
     try:
@@ -260,10 +261,11 @@ if "__main__" == __name__:
             dataloader, desc=f"Depth Inference on {dataset.disp_name}", leave=True
         ):
             # Read input image
-            rgb_int = batch["rgb_int"].squeeze().numpy().astype(np.uint8)  # [3, H, W]
-            rgb_int = np.moveaxis(rgb_int, 0, -1)  # [H, W, 3]
-            input_image = Image.fromarray(rgb_int)
-
+            
+            # rgb_int = batch["rgb_int"].squeeze().numpy().astype(np.uint8)  # [3, H, W]
+            # rgb_int = np.moveaxis(rgb_int, 0, -1)  # [H, W, 3]
+            # input_image = Image.fromarray(rgb_int)
+            input_image = batch["rgb_int"]
             # Random number generator
             if seed is None:
                 generator = None
@@ -297,5 +299,5 @@ if "__main__" == __name__:
             save_to = os.path.join(scene_dir, pred_basename)
             if os.path.exists(save_to):
                 logging.warning(f"Existing file: '{save_to}' will be overwritten")
-            # print(save_to, depth_pred.shape)
+            print(save_to, depth_pred.shape, input_image.size)
             np.save(save_to, depth_pred)
