@@ -13,12 +13,12 @@ if [ -d $checkpoint_name ]; then
 fi
 
 if [[ "$checkpoint_name" == *"normals"* || "$checkpoint_name" == *"iid"* ]]; then
-    wget -nv --show-progress https://share.phys.ethz.ch/~pf/bingkedata/marigold/marigold_normals/checkpoint/${checkpoint_name}.zip
+    wget -cnv --show-progress https://share.phys.ethz.ch/~pf/bingkedata/marigold/marigold_normals/checkpoint/${checkpoint_name}.zip
     unzip ${checkpoint_name}.zip
     rm -f ${checkpoint_name}.zip
 
 else
-    wget -nv --show-progress https://share.phys.ethz.ch/~pf/bingkedata/marigold/checkpoint/${checkpoint_name}.tar
+    wget -cnv --show-progress https://share.phys.ethz.ch/~pf/bingkedata/marigold/checkpoint/${checkpoint_name}.tar
     tar -xf ${checkpoint_name}.tar
     rm -f ${checkpoint_name}.tar
 fi

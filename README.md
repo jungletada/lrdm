@@ -1,9 +1,9 @@
 # Marigold Computer Vision
 
-This project implements Marigold, a Computer Vision method for estimating image characteristics. Initially proposed for
+<!-- This project implements Marigold, a Computer Vision method for estimating image characteristics. Initially proposed for
 extracting high-resolution depth maps in our CVPR 2024 paper **"Repurposing Diffusion-Based Image Generators for Monocular 
 Depth Estimation"**, we extended the method to other modalities as described in our follow-up paper **"Marigold: Affordable 
-Adaptation of Diffusion-Based Image Generators for Image Analysis"**. 
+Adaptation of Diffusion-Based Image Generators for Image Analysis"**.  -->
 
 ## Marigold: Affordable Adaptation of Diffusion-Based Image Generators for Image Analysis
 
@@ -28,13 +28,6 @@ Team:
 [Anton Obukhov](https://www.obukhov.ai/),
 [Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ)
 
-We present Marigold, a family of conditional generative models and a fine-tuning protocol that extracts the knowledge 
-from pretrained latent diffusion models like Stable Diffusion and adapts them for dense image analysis tasks, including 
-monocular depth estimation, surface normal prediction, and intrinsic decomposition. Marigold requires minimal 
-modification of the pre-trained latent diffusion model's architecture, trains with small synthetic datasets on a single 
-GPU over a few days, and demonstrates state-of-the-art zero-shot generalization.
-
-![teaser_all](doc/teaser_marigold_all.jpg)
 
 ## Repurposing Diffusion-Based Image Generators for Monocular Depth Estimation
 
@@ -52,13 +45,6 @@ Team:
 [Nando Metzger](https://nandometzger.github.io/),
 [Rodrigo Caye Daudt](https://rcdaudt.github.io/),
 [Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ)
-
-We present Marigold, a diffusion model, and an associated fine-tuning protocol for monocular depth estimation. Its core 
-principle is to leverage the rich visual knowledge stored in modern generative image models. Our model, derived from 
-Stable Diffusion and fine-tuned with synthetic data, can zero-shot transfer to unseen data, offering state-of-the-art 
-monocular depth estimation results.
-
-![teaser_depth](doc/teaser_marigold_depth.png)
 
 ## 📢 News
 2025-05-15: Released code and a [checkpoint](https://huggingface.co/prs-eth/marigold-iid-lighting-v1-1) of Marigold Intrinsic Image Decomposition predicting Albedo, diffuse Shading, and non-diffuse Residual (Marigold-IID-Lighting v1.1).<br>
@@ -133,9 +119,9 @@ pip install -r requirements.txt
 Keep the environment activated before running the inference script. 
 Activate the environment again after restarting the terminal session.
 
-## 🏃 Testing on your images
+<!-- ## 🏃 Testing on your images -->
 
-### 📷 Prepare images
+<!-- ### 📷 Prepare images
 
 Use selected images from our paper:
 
@@ -143,9 +129,9 @@ Use selected images from our paper:
 bash script/download_sample_data.sh
 ```
 
-Or place your images in a directory, for example, under `input/in-the-wild_example`, and run the following inference command.
+Or place your images in a directory, for example, under `input/in-the-wild_example`, and run the following inference command. -->
 
-### 🚀 Run inference (for practical usage)
+<!-- ### 🚀 Run inference (for practical usage)
 
 ```bash
 # Depth
@@ -179,9 +165,9 @@ python script/iid/run.py \
     --input_rgb_dir input/in-the-wild_example \
     --output_dir output/in-the-wild_example \
     --fp16
-```
+``` -->
 
-### ⚙️ Inference settings
+<!-- ### ⚙️ Inference settings
 
 The default settings are optimized for the best results. However, the behavior of the code can be customized:
 
@@ -203,11 +189,11 @@ The default settings are optimized for the best results. However, the behavior o
 - `--apple_silicon`: Use Apple Silicon MPS acceleration.
 
 
-### 🎮 Run inference (for academic comparisons)
+<!-- ### 🎮 Run inference (for academic comparisons) -->
 
 These settings correspond to our paper. For academic comparison, please run with the settings below (if you only want to do fast inference on your own images, you can set `--ensemble_size 1`).
 
-```bash
+<!-- ```bash
 # Depth
 python script/depth/run.py \
     --checkpoint prs-eth/marigold-depth-v1-1 \
@@ -256,7 +242,7 @@ python script/depth/run.py \
 ```
 
 You can find all results in the `output` directory. Enjoy!
-
+ --> -->
 
 ### ⬇ Checkpoint cache
 
@@ -345,9 +331,10 @@ bash script/depth/eval/12_eval_nyu.sh   # Evaluate predictions -->
 ```bash
 # Depth
 bash script/depth/eval/21_infer_kitti.sh
+bash script/depth/eval/22_eval_kitti.sh
 ```
 
-```bash
+<!-- ```bash
 # Normals
 bash script/normals/eval/11_infer_scannet.sh  # Run inference
 bash script/normals/eval/12_eval_scannet.sh   # Evaluate predictions
@@ -366,7 +353,7 @@ bash script/iid/eval/22_eval_lighting_hypersim.sh   # Evaluate predictions
 # Depth (the original CVPR version)
 bash script/depth/eval_old/11_infer_nyu.sh  # Run inference
 bash script/depth/eval_old/12_eval_nyu.sh   # Evaluate predictions
-```
+``` -->
 
 Note: although the seed has been set, the results might still be slightly different on different hardware.
 

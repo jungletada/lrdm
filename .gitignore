@@ -8,7 +8,9 @@
 /wandb
 /venv
 /cache
-
+kitti/
+*.tar
+*.zip
 **/.ipynb_checkpoints/
 .vscode/
 .idea

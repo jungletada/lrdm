@@ -1,0 +1,6 @@
+name: weather_depth_kitti
+disp_name: kitti_depth_eigen_train_full
+dir: data/kitti
+filenames: data_split/kitti_depth/eigen_train_files_with_gt.txt
+kitti_bm_crop: true
+valid_mask_crop: eigen

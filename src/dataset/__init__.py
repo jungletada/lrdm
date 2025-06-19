@@ -53,7 +53,8 @@ from .oasis_dataset import OasisNormalsDataset
 from .scannet_dataset import ScanNetDepthDataset, ScanNetNormalsDataset
 from .sintel_dataset import SintelNormalsDataset
 from .vkitti_dataset import VirtualKITTIDepthDataset
-from .weatherkitti_dataset import WeathewrKITTIDepthMixedDataset
+from .weatherkitti_dataset import \
+    WeatherKITTIDepthMixedDataset, WeatherKITTIDepthPairedDataset, WeatherKITTIDepthDataset
 
 dataset_name_class_dict = {
     "hypersim_depth": HypersimDepthDataset,
@@ -73,8 +74,8 @@ dataset_name_class_dict = {
     "oasis_normals": OasisNormalsDataset,
     "interiorverse_iid": InteriorVerseIIDDataset,
     "hypersim_iid": HypersimIIDDataset,
-    "weather_depth_kitti": WeathewrKITTIDepthMixedDataset,
-    
+    "weather_depth_kitti": WeatherKITTIDepthMixedDataset,
+        # WeathewrKITTIDepthMixedDataset,
 }
 
 

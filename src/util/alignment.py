@@ -60,7 +60,7 @@ def align_depth_least_square(
 
     assert (
         gt.shape == pred.shape == valid_mask.shape
-    ), f"{gt.shape}, {pred.shape}, {valid_mask.shape}"
+    ), f"Shapes are not matched! GT:{gt.shape}, Pred: {pred.shape}, Mask: {valid_mask.shape}"
 
     gt_masked = gt[valid_mask].reshape((-1, 1))
     pred_masked = pred[valid_mask].reshape((-1, 1))

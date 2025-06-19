@@ -5,7 +5,7 @@ set -x
 subfolder=${1:-"eval"}
 
 python script/depth/eval.py \
-    --base_data_dir $BASE_DATA_DIR \
+    --base_data_dir data/kitti \
     --dataset_config config/dataset_depth/data_kitti_eigen_test.yaml \
     --alignment least_square \
     --prediction_dir output/${subfolder}/kitti_eigen_test/prediction \

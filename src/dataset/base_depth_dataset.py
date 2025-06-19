@@ -146,14 +146,14 @@ class BaseDepthDataset(Dataset):
 
         return rasters, other
 
-    def _load_rgb_data(self, rgb_rel_path):
+    def _load_rgb_data(self, rgb_rel_path, dict_names=("rgb_int", "rgb_norm")):
         # Read RGB data
         rgb = self._read_rgb_file(rgb_rel_path)
         rgb_norm = rgb / 255.0 * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
 
         outputs = {
-            "rgb_int": torch.from_numpy(rgb).int(),
-            "rgb_norm": torch.from_numpy(rgb_norm).float(),
+            dict_names[0]: torch.from_numpy(rgb).int(),
+            dict_names[1]: torch.from_numpy(rgb_norm).float(),
         }
         return outputs
 
@@ -161,12 +161,12 @@ class BaseDepthDataset(Dataset):
         # Read depth data
         outputs = {}
         depth_raw = self._read_depth_file(depth_rel_path).squeeze()
-        depth_raw_linear = torch.from_numpy(depth_raw).float().unsqueeze(0)  # [1, H, W]
+        depth_raw_linear = torch.from_numpy(depth_raw.copy()).float().unsqueeze(0)  # [1, H, W]
         outputs["depth_raw_linear"] = depth_raw_linear.clone()
 
         if self.has_filled_depth:
             depth_filled = self._read_depth_file(filled_rel_path).squeeze()
-            depth_filled_linear = torch.from_numpy(depth_filled).float().unsqueeze(0)
+            depth_filled_linear = torch.from_numpy(depth_filled.copy()).float().unsqueeze(0)
             outputs["depth_filled_linear"] = depth_filled_linear
         else:
             outputs["depth_filled_linear"] = depth_raw_linear.clone()
@@ -184,7 +184,7 @@ class BaseDepthDataset(Dataset):
                 filled_rel_path = filename_line[2]
         return rgb_rel_path, depth_rel_path, filled_rel_path
 
-    def _read_image(self, img_rel_path) -> np.ndarray:
+    def _read_image(self, img_rel_path, to_rgb=False) -> np.ndarray:
         if self.is_tar:
             if self.tar_obj is None:
                 self.tar_obj = tarfile.open(self.dataset_dir)
@@ -193,7 +193,10 @@ class BaseDepthDataset(Dataset):
             image_to_read = io.BytesIO(image_to_read)
         else:
             image_to_read = os.path.join(self.dataset_dir, img_rel_path)
+
         image = Image.open(image_to_read)  # [H, W, rgb]
+        if to_rgb:
+            image = image.convert('RGB')
         image = np.asarray(image)
         return image
 

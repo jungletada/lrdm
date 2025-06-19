@@ -31,7 +31,8 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.insert(0, os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import argparse
 import logging
@@ -68,10 +69,9 @@ eval_metrics = [
     "silog_rmse",
 ]
 
-if "__main__" == __name__:
-    logging.basicConfig(level=logging.INFO)
 
-    # -------------------- Arguments --------------------
+def get_args():
+     # -------------------- Arguments --------------------
     parser = argparse.ArgumentParser(
         description="Marigold : Monocular Depth Estimation : Metrics Evaluation"
     )
@@ -109,28 +109,29 @@ if "__main__" == __name__:
         help="Max operating resolution used for LS alignment",
     )
     parser.add_argument("--no_cuda", action="store_true", help="Run without cuda.")
+    return parser.parse_args()
 
-    args = parser.parse_args()
 
+if "__main__" == __name__:
+    logging.basicConfig(level=logging.INFO)
+    args = get_args()
     os.makedirs(args.output_dir, exist_ok=True)
-
     # -------------------- Device --------------------
     cuda_avail = torch.cuda.is_available() and not args.no_cuda
     device = torch.device("cuda" if cuda_avail else "cpu")
     logging.info(f"Device: {device}")
-
-    # -------------------- Data --------------------
+    # -------------------- Data -----------------------
     cfg_data = OmegaConf.load(args.dataset_config)
-
     dataset = get_dataset(
-        cfg_data, base_data_dir=args.base_data_dir, mode=DatasetMode.EVAL
+        cfg_data, 
+        base_data_dir=args.base_data_dir, 
+        mode=DatasetMode.EVAL,
+        join_split=False,
     )
 
     dataloader = DataLoader(dataset, batch_size=1, num_workers=0)
-
     # -------------------- Eval metrics --------------------
     metric_funcs = [getattr(metric, _met) for _met in eval_metrics]
-
     metric_tracker = MetricTracker(*[m.__name__ for m in metric_funcs])
     metric_tracker.reset()
 
@@ -160,12 +161,13 @@ if "__main__" == __name__:
         pred_basename = get_pred_name(rgb_basename, dataset.name_mode, suffix=".npy")
         pred_name = os.path.join(os.path.dirname(rgb_name), pred_basename)
         pred_path = os.path.join(args.prediction_dir, pred_name)
-        depth_pred = np.load(pred_path).astype(np.float32)
-
+        
         if not os.path.exists(pred_path):
             logging.warning(f"Can't find prediction: {pred_path}")
             continue
 
+        depth_pred = np.load(pred_path)
+            
         # Align with GT using least square
         if "least_square" == args.alignment:
             depth_pred, scale, shift = align_depth_least_square(
@@ -201,7 +203,6 @@ if "__main__" == __name__:
         depth_pred = np.clip(
             depth_pred, a_min=dataset.min_depth, a_max=dataset.max_depth
         )
-
         # clip to d > 0 for evaluation
         depth_pred = np.clip(depth_pred, a_min=1e-6, a_max=None)
 
