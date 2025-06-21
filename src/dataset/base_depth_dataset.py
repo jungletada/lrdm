@@ -201,14 +201,14 @@ class BaseDepthDataset(Dataset):
         return image
 
     def _read_rgb_file(self, rel_path) -> np.ndarray:
-        rgb = self._read_image(rel_path)
+        rgb = self._read_image(rel_path, to_rgb=True)
         rgb = np.transpose(rgb, (2, 0, 1)).astype(int)  # [rgb, H, W]
         return rgb
 
     def _read_depth_file(self, rel_path):
         depth_in = self._read_image(rel_path)
         #  Replace code below to decode depth according to dataset definition
-        depth_decoded = depth_in
+        depth_decoded = depth_in 
 
         return depth_decoded
 

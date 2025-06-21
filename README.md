@@ -189,10 +189,9 @@ The default settings are optimized for the best results. However, the behavior o
 - `--apple_silicon`: Use Apple Silicon MPS acceleration.
 
 
-<!-- ### 🎮 Run inference (for academic comparisons) -->
-
+<!-- ### 🎮 Run inference (for academic comparisons)
 These settings correspond to our paper. For academic comparison, please run with the settings below (if you only want to do fast inference on your own images, you can set `--ensemble_size 1`).
-
+ -->
 <!-- ```bash
 # Depth
 python script/depth/run.py \

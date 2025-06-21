@@ -34,10 +34,9 @@ import logging
 from tqdm.auto import tqdm
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")))
-
-import numpy as np
 import torch
 from PIL import Image
+import numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
@@ -299,5 +298,5 @@ if "__main__" == __name__:
             save_to = os.path.join(scene_dir, pred_basename)
             if os.path.exists(save_to):
                 logging.warning(f"Existing file: '{save_to}' will be overwritten")
-            print(save_to, depth_pred.shape, input_image.size)
+            # print(save_to, depth_pred.shape, input_image.size)
             np.save(save_to, depth_pred)

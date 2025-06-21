@@ -1,6 +1,7 @@
 # Modified from Marigold:
 import os
 import torch
+import random
 from .base_depth_dataset import \
     BaseDepthDataset, DepthFileNameMode, DatasetMode
 
@@ -25,11 +26,11 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
     ) -> None:
         super().__init__(
             # KITTI data parameter
-            min_depth=1e-5,
+            min_depth=1e-6,
             max_depth=80,
             has_filled_depth=False,
             name_mode=DepthFileNameMode.id,
-            **kwargs,)
+            **kwargs)
         
         self.weather_opt = WeatherOption()
         self.rgb_path = 'rgb'
@@ -70,7 +71,21 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
         self.snowgan_files = [os.path.join(self.weather_opt.snowgan_path[0], 
                                            filename_line[0][11:].replace('data', self.weather_opt.snowgan_path[1]))
                           for filename_line in self.filenames]
+        
+        
+        visual_selected_files = 'data_split/kitti_depth/eigen_test_files_sub_20.txt'
+        selected_files = random.sample(self.filenames, min(25, len(self.filenames)))
+        # Write selected files to the specified path
+        with open(visual_selected_files, 'w') as f:
+            for filename_line in selected_files:
+                f.write(f"{filename_line[0]} {filename_line[1]} {filename_line[2]}\n")
 
+    def _read_depth_file(self, rel_path):
+        depth_in = self._read_image(rel_path)
+        # Decode KITTI depth
+        depth_decoded = depth_in / 256.0
+        return depth_decoded
+    
     def _load_rgb_data(self, rgb_rel_path, dict_names=("rgb_int", "rgb_norm")):
         rgb = self._read_rgb_file(rgb_rel_path)
         rgb_norm = rgb / 255.0 * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
@@ -136,7 +151,6 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
     def _get_valid_mask(self, depth: torch.Tensor):
         # reference: https://github.com/cleinc/bts/blob/master/pytorch/bts_eval.py
         valid_mask = super()._get_valid_mask(depth)  # [1, H, W]
-
         if self.valid_mask_crop is not None:
             eval_mask = torch.zeros_like(valid_mask.squeeze()).bool()
             gt_height, gt_width = eval_mask.shape
@@ -162,17 +176,16 @@ class WeatherKITTIDepthMixedDataset(WeatherKITTIDepthDataset):
         super().__init__(**kwargs)
         self.mix_filenames = self.rgb_files + self.rain_files + self.raingan_files + \
                                 self.fog1_files + self.fog2_files + self.snow_files + self.snowgan_files
-        self.rgb_files = self.rgb_files # * (self.weather_opt.num_domains + 1)
-        self.depth_files = self.depth_files # * (self.weather_opt.num_domains + 1)
+        self.rgb_files = self.rgb_files * (self.weather_opt.num_domains + 1)
+        self.depth_files = self.depth_files * (self.weather_opt.num_domains + 1)
         # print(len(self.mix_filenames), len(self.depth_files))
                   
     def __len__(self):
-        return len(self.rgb_files)
-        # return len(self.mix_filenames)
+        # return len(self.rgb_files)
+        return len(self.mix_filenames)
     
     def _get_data_path(self, index):
-        # rgb_rel_path = self.mix_filenames[index]
-        rgb_rel_path = self.rgb_files[index]
+        rgb_rel_path = self.mix_filenames[index]
         # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
         depth_rel_path, filled_rel_path = None, None
         if DatasetMode.RGB_ONLY != self.mode:
@@ -221,11 +234,10 @@ class WeatherKITTIDepthPairedDataset(WeatherKITTIDepthDataset):
             rasters.update(depth_data)
             # valid mask
             rasters["valid_mask_raw"] = self._get_valid_mask(
-                rasters["depth_raw_linear"]
-            ).clone()
+                rasters["depth_raw_linear"]).clone()
+            
             rasters["valid_mask_filled"] = self._get_valid_mask(
-                rasters["depth_filled_linear"]
-            ).clone()
+                rasters["depth_filled_linear"]).clone()
 
         other = {"index": index, "rgb_relative_path": rgb_rel_path}
 

@@ -5,13 +5,13 @@ set -x
 # Use specified checkpoint path, otherwise, default value
 ckpt=${1:-"checkpoint/marigold-depth-v1-1"}
 subfolder=${2:-"eval"}
-n_ensemble=${3:-1}
+n_ensemble=${3:-2}
 
 python script/depth/infer.py \
     --checkpoint $ckpt \
     --seed 1234 \
     --base_data_dir data/kitti \
-    --denoise_steps 1 \
+    --denoise_steps 2 \
     --ensemble_size ${n_ensemble} \
     --processing_res 0 \
     --dataset_config config/dataset_depth/data_kitti_eigen_test.yaml \

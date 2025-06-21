@@ -38,6 +38,7 @@ import argparse
 import logging
 import torch
 import numpy as np
+import pandas as pd
 from tqdm.auto import tqdm
 from omegaconf import OmegaConf
 from tabulate import tabulate
@@ -178,6 +179,7 @@ if "__main__" == __name__:
                 return_scale_shift=True,
                 max_resolution=args.alignment_max_res,
             )
+
         elif "least_square_disparity" == args.alignment:
             # convert GT depth -> GT disparity
             gt_disparity, gt_non_neg_mask = depth2disparity(
@@ -216,7 +218,7 @@ if "__main__" == __name__:
             arr = tensor.cpu().numpy()
             plt.figure()
             plt.axis('off')
-            plt.imshow(arr, cmap='plasma')
+            plt.imshow(arr, cmap="Spectral")
             plt.tight_layout(pad=0)
             # Ensure the directory exists before saving
             os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -224,8 +226,8 @@ if "__main__" == __name__:
             plt.close()
 
         # Save predicted and ground truth depth as heatmaps
-        pred_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_pred_heatmap.png'))
-        gt_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_gt_heatmap.png'))
+        pred_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_pred.png'))
+        gt_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_gt.png'))
         save_heatmap(depth_pred_ts.squeeze(), pred_heatmap_path)
         save_heatmap(torch.from_numpy(depth_raw).to(device).squeeze(), gt_heatmap_path)
         
@@ -262,3 +264,9 @@ if "__main__" == __name__:
     with open(_save_to, "w+") as f:
         f.write(eval_text)
         logging.info(f"Evaluation metrics saved to {_save_to}")
+        
+    result_df = pd.read_csv(per_sample_filename)
+    result_df['group'] = result_df['filename'].apply(lambda x: x.split('/')[0])
+    grouped_avg = result_df.groupby('group').mean(numeric_only=True)
+    per_group_filename = os.path.join(args.output_dir, "per_group_metrics.csv")
+    grouped_avg.to_csv(per_group_filename, index='group')

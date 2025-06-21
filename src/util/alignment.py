@@ -44,7 +44,7 @@ def align_depth_least_square(
     gt = gt_arr.squeeze()  # [H, W]
     pred = pred_arr.squeeze()
     valid_mask = valid_mask_arr.squeeze()
-
+    
     # Downsample
     if max_resolution is not None:
         scale_factor = np.min(max_resolution / np.array(ori_shape[-2:]))
@@ -64,15 +64,12 @@ def align_depth_least_square(
 
     gt_masked = gt[valid_mask].reshape((-1, 1))
     pred_masked = pred[valid_mask].reshape((-1, 1))
-
     # numpy solver
     _ones = np.ones_like(pred_masked)
     A = np.concatenate([pred_masked, _ones], axis=-1)
     X = np.linalg.lstsq(A, gt_masked, rcond=None)[0]
     scale, shift = X
-
     aligned_pred = pred_arr * scale + shift
-
     # restore dimensions
     aligned_pred = aligned_pred.reshape(ori_shape)
 
