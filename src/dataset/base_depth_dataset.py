@@ -196,7 +196,7 @@ class BaseDepthDataset(Dataset):
 
         image = Image.open(image_to_read)  # [H, W, rgb]
         if to_rgb:
-            image = image.convert('RGB')
+            image = image.convert("RGB") 
         image = np.asarray(image)
         return image
 

@@ -50,8 +50,7 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
                           for filename_line in self.filenames]
         self.depth_files = [os.path.join(self.depth_path, filename_line[1])
                           for filename_line in self.filenames]
-        self.filled = [os.path.join(self.depth_path, filename_line[2])
-                          for filename_line in self.filenames]
+        self.filled = [filename_line[2] for filename_line in self.filenames]
         
         self.rain_files = [os.path.join(self.weather_opt.rain_path[0], 
                                         filename_line[0][11:].replace('data', self.weather_opt.rain_path[1]))
@@ -71,14 +70,6 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
         self.snowgan_files = [os.path.join(self.weather_opt.snowgan_path[0], 
                                            filename_line[0][11:].replace('data', self.weather_opt.snowgan_path[1]))
                           for filename_line in self.filenames]
-        
-        
-        visual_selected_files = 'data_split/kitti_depth/eigen_test_files_sub_20.txt'
-        selected_files = random.sample(self.filenames, min(25, len(self.filenames)))
-        # Write selected files to the specified path
-        with open(visual_selected_files, 'w') as f:
-            for filename_line in selected_files:
-                f.write(f"{filename_line[0]} {filename_line[1]} {filename_line[2]}\n")
 
     def _read_depth_file(self, rel_path):
         depth_in = self._read_image(rel_path)
@@ -165,7 +156,6 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
                     int(0.3324324 * gt_height) : int(0.91351351 * gt_height),
                     int(0.0359477 * gt_width) : int(0.96405229 * gt_width),
                 ] = 1
-
             eval_mask.reshape(valid_mask.shape)
             valid_mask = torch.logical_and(valid_mask, eval_mask)
         return valid_mask
@@ -174,18 +164,18 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
 class WeatherKITTIDepthMixedDataset(WeatherKITTIDepthDataset):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.mix_filenames = self.rgb_files + self.rain_files + self.raingan_files + \
-                                self.fog1_files + self.fog2_files + self.snow_files + self.snowgan_files
-        self.rgb_files = self.rgb_files * (self.weather_opt.num_domains + 1)
-        self.depth_files = self.depth_files * (self.weather_opt.num_domains + 1)
+        # self.mix_filenames = self.rgb_files + self.rain_files + self.raingan_files + \
+        #                         self.fog1_files + self.fog2_files + self.snow_files + self.snowgan_files
+        self.rgb_files = self.rgb_files # * (self.weather_opt.num_domains + 1)
+        self.depth_files = self.depth_files # * (self.weather_opt.num_domains + 1)
         # print(len(self.mix_filenames), len(self.depth_files))
-                  
+
     def __len__(self):
-        # return len(self.rgb_files)
-        return len(self.mix_filenames)
+        # mix_filenames
+        return len(self.rgb_files)
     
     def _get_data_path(self, index):
-        rgb_rel_path = self.mix_filenames[index]
+        rgb_rel_path = self.rgb_files[index]
         # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
         depth_rel_path, filled_rel_path = None, None
         if DatasetMode.RGB_ONLY != self.mode:
@@ -193,6 +183,7 @@ class WeatherKITTIDepthMixedDataset(WeatherKITTIDepthDataset):
             depth_rel_path = self.depth_files[index]
             if self.has_filled_depth:          
                 filled_rel_path = self.filled[index]  # e.g., 721.5377
+        # print(rgb_rel_path, depth_rel_path, filled_rel_path)
         return rgb_rel_path, depth_rel_path, filled_rel_path
 
 

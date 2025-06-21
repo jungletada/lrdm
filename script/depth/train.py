@@ -30,19 +30,20 @@
 
 import sys
 import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
+sys.path.insert(0, os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..")))
 import argparse
 import logging
-import os
 import shutil
-import torch
-from datetime import datetime, timedelta
-from omegaconf import OmegaConf
-from torch.utils.data import ConcatDataset, DataLoader
 from tqdm import tqdm
 from typing import List, Union
+from omegaconf import OmegaConf
+from datetime import datetime, timedelta
+
+import torch
+from torch.utils.data import ConcatDataset, DataLoader
+from huggingface_hub import hf_hub_download
+from huggingface_hub import snapshot_download
 
 from marigold import MarigoldDepthPipeline
 from src.dataset import BaseDepthDataset, DatasetMode, get_dataset
@@ -67,11 +68,8 @@ from src.util.logging_util import (
 from src.util.slurm_util import get_local_scratch_dir, is_on_slurm
 
 
-if "__main__" == __name__:
-    t_start = datetime.now()
-    logging.info(f"Started at {t_start}")
-
-    # -------------------- Arguments --------------------
+def get_args():
+     # -------------------- Arguments --------------------
     parser = argparse.ArgumentParser(
         description="Marigold : Monocular Depth Estimation : Training"
     )
@@ -98,7 +96,7 @@ if "__main__" == __name__:
         help="Save checkpoint and exit after X minutes.",
     )
     parser.add_argument(
-        "--no_wandb",
+        "--wandb",
         action="store_true",
         help="Run without Weights and Biases logging.",
     )
@@ -108,12 +106,13 @@ if "__main__" == __name__:
         help="On Slurm cluster, do not copy data to the local scratch.",
     )
     parser.add_argument(
-        "--base_data_dir", type=str, default=None, help="Base path to the datasets."
+        "--base_data_dir", type=str, default='data/kitti', 
+        help="Base path to the datasets."
     )
     parser.add_argument(
         "--base_ckpt_dir",
         type=str,
-        default=None,
+        default='checkpoint',
         help="Base path to the pretrained checkpoints.",
     )
     parser.add_argument(
@@ -121,10 +120,17 @@ if "__main__" == __name__:
         action="store_true",
         help="Add datetime to the output folder name.",
     )
+    return parser.parse_args()
 
-    args = parser.parse_args()
+
+if "__main__" == __name__:
+    t_start = datetime.now()
+    logging.info(f"Started at {t_start}")
+    args = get_args()
+
     resume_run = args.resume_run
     output_dir = args.output_dir
+
     base_data_dir = (
         args.base_data_dir
         if args.base_data_dir is not None
@@ -160,7 +166,7 @@ if "__main__" == __name__:
             out_dir_run = os.path.join(output_dir, job_name)
         else:
             out_dir_run = os.path.join("./output", job_name)
-        os.makedirs(out_dir_run, exist_ok=False)
+        os.makedirs(out_dir_run, exist_ok=True)
 
     cfg_data = cfg.dataset
 
@@ -183,7 +189,7 @@ if "__main__" == __name__:
     logging.debug(f"config: {cfg}")
 
     # Initialize wandb
-    if not args.no_wandb:
+    if args.wandb:
         if resume_run is not None:
             wandb_id = load_wandb_job_id(out_dir_run)
             wandb_cfg_dict = {
@@ -272,14 +278,24 @@ if "__main__" == __name__:
     depth_transform: DepthNormalizerBase = get_depth_normalizer(
         cfg_normalizer=cfg.depth_normalization
     )
-    train_dataset: Union[BaseDepthDataset, List[BaseDepthDataset]] = get_dataset(
+    train_dataset: BaseDepthDataset = get_dataset(
         cfg_data.train,
         base_data_dir=base_data_dir,
         mode=DatasetMode.TRAIN,
         augmentation_args=cfg.augmentation,
         depth_transform=depth_transform,
+        join_split=False,
     )
+    # demo = train_dataset[-10]
+    # for k, v in demo.items():
+    #     print(k)
+    #     if isinstance(v, torch.Tensor):
+    #         print(v.shape)
+    #     else:
+    #         print(v)
+    
     logging.debug("Augmentation: ", cfg.augmentation)
+    
     if "mixed" == cfg_data.train.name:
         dataset_ls = train_dataset
         assert len(cfg_data.train.prob_ls) == len(
@@ -299,6 +315,7 @@ if "__main__" == __name__:
             batch_sampler=mixed_sampler,
             num_workers=cfg.dataloader.num_workers,
         )
+    
     else:
         train_loader = DataLoader(
             dataset=train_dataset,
@@ -314,6 +331,7 @@ if "__main__" == __name__:
             _val_dict,
             base_data_dir=base_data_dir,
             mode=DatasetMode.EVAL,
+            join_split=False,
         )
         _val_loader = DataLoader(
             dataset=_val_dataset,
@@ -323,26 +341,29 @@ if "__main__" == __name__:
         )
         val_loaders.append(_val_loader)
 
-    # Visualization dataset
-    vis_loaders: List[DataLoader] = []
-    for _vis_dict in cfg_data.vis:
-        _vis_dataset = get_dataset(
-            _vis_dict,
-            base_data_dir=base_data_dir,
-            mode=DatasetMode.EVAL,
-        )
-        _vis_loader = DataLoader(
-            dataset=_vis_dataset,
-            batch_size=1,
-            shuffle=False,
-            num_workers=cfg.dataloader.num_workers,
-        )
-        vis_loaders.append(_vis_loader)
+    # # Visualization dataset
+    # vis_loaders: List[DataLoader] = []
+    # for _vis_dict in cfg_data.vis:
+    #     _vis_dataset = get_dataset(
+    #         _vis_dict,
+    #         base_data_dir=base_data_dir,
+    #         mode=DatasetMode.EVAL,
+    #     )
+    #     _vis_loader = DataLoader(
+    #         dataset=_vis_dataset,
+    #         batch_size=1,
+    #         shuffle=False,
+    #         num_workers=cfg.dataloader.num_workers,
+    #     )
+    #     vis_loaders.append(_vis_loader)
 
     # -------------------- Model --------------------
     _pipeline_kwargs = cfg.pipeline.kwargs if cfg.pipeline.kwargs is not None else {}
+    sd_model_path = os.path.join(base_ckpt_dir, cfg.model.pretrained_path)
+    print(f'sd_model_path: {sd_model_path}')
+    # snapshot_download("stabilityai/stable-diffusion-2", local_dir=sd_model_path)
     model = MarigoldDepthPipeline.from_pretrained(
-        os.path.join(base_ckpt_dir, cfg.model.pretrained_path), **_pipeline_kwargs
+        sd_model_path, **_pipeline_kwargs
     )
 
     # -------------------- Trainer --------------------
@@ -365,7 +386,7 @@ if "__main__" == __name__:
         out_dir_vis=out_dir_vis,
         accumulation_steps=accumulation_steps,
         val_dataloaders=val_loaders,
-        vis_dataloaders=vis_loaders,
+        vis_dataloaders=None,
     )
 
     # -------------------- Checkpoint --------------------

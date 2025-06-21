@@ -46,21 +46,6 @@ Team:
 [Rodrigo Caye Daudt](https://rcdaudt.github.io/),
 [Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ)
 
-## 📢 News
-2025-05-15: Released code and a [checkpoint](https://huggingface.co/prs-eth/marigold-iid-lighting-v1-1) of Marigold Intrinsic Image Decomposition predicting Albedo, diffuse Shading, and non-diffuse Residual (Marigold-IID-Lighting v1.1).<br>
-2025-05-15: Released code and a [checkpoint](https://huggingface.co/prs-eth/marigold-iid-appearance-v1-1) of Marigold Intrinsic Image Decomposition predicting Albedo, Roughness, and Metallicity (Marigold-IID-Appearance v1.1).<br>
-2025-05-15: Released code and a [checkpoint](https://huggingface.co/prs-eth/marigold-normals-v1-1) of Marigold Surface Normals Estimation (v1.1).<br>
-2025-05-15: Released an updated [checkpoint](https://huggingface.co/prs-eth/marigold-depth-v1-1) of Marigold Depth (v1.1), trained with updated noise scheduler settings (zero-SNR and trailing timestamps), and augmentations.<br>
-2024-05-28: Training code is released.<br>
-2024-05-27: Marigold pipelines are merged into the `diffusers` core starting v0.28.0 [release](https://github.com/huggingface/diffusers/releases/tag/v0.28.0)!<br>
-2024-03-23: Added a Latent Consistency Model (LCM) [checkpoint](https://huggingface.co/prs-eth/marigold-depth-lcm-v1-0).<br>
-2024-03-04: The paper is accepted at CVPR 2024.<br>
-2023-12-22: Contributed to Diffusers [community pipeline](https://github.com/huggingface/diffusers/tree/main/examples/community#marigold-depth-estimation).<br>
-2023-12-19: Updated [license](LICENSE.txt) to Apache License, Version 2.0.<br>
-2023-12-08: Added the first interactive [Hugging Face Space Demo](https://huggingface.co/spaces/prs-eth/marigold) of depth estimation.<br>
-2023-12-05: Added a [Google Colab](https://colab.research.google.com/drive/12G8reD13DdpMie5ZQlaFNo2WCGeNUH-u?usp=sharing)<br>
-2023-12-04: Added an [arXiv paper](https://arxiv.org/abs/2312.02145) and inference code (this repository).
-
 ## 🚀 Usage
 
 **We offer several ways to interact with Marigold**:
@@ -119,54 +104,6 @@ pip install -r requirements.txt
 Keep the environment activated before running the inference script. 
 Activate the environment again after restarting the terminal session.
 
-<!-- ## 🏃 Testing on your images -->
-
-<!-- ### 📷 Prepare images
-
-Use selected images from our paper:
-
-```bash
-bash script/download_sample_data.sh
-```
-
-Or place your images in a directory, for example, under `input/in-the-wild_example`, and run the following inference command. -->
-
-<!-- ### 🚀 Run inference (for practical usage)
-
-```bash
-# Depth
-python script/depth/run.py \
-    --checkpoint prs-eth/marigold-depth-v1-1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example \
-    --fp16
-```
-
-```bash
-# Normals
-python script/normals/run.py \
-    --checkpoint prs-eth/marigold-normals-v1-1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example \
-    --fp16
-```
-
-```bash
-# IID (appearance model)
-python script/iid/run.py \
-    --checkpoint prs-eth/marigold-iid-appearance-v1-1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example \
-    --fp16
-
-# IID (lighting model)
-python script/iid/run.py \
-    --checkpoint prs-eth/marigold-iid-lighting-v1-1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example \
-    --fp16
-``` -->
-
 <!-- ### ⚙️ Inference settings
 
 The default settings are optimized for the best results. However, the behavior of the code can be customized:
@@ -192,64 +129,16 @@ The default settings are optimized for the best results. However, the behavior o
 <!-- ### 🎮 Run inference (for academic comparisons)
 These settings correspond to our paper. For academic comparison, please run with the settings below (if you only want to do fast inference on your own images, you can set `--ensemble_size 1`).
  -->
-<!-- ```bash
-# Depth
-python script/depth/run.py \
-    --checkpoint prs-eth/marigold-depth-v1-1 \
-    --denoise_steps 1 \
-    --ensemble_size 10 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-```
-
-```bash
-# Normals
-python script/normals/run.py \
-    --checkpoint prs-eth/marigold-normals-v1-1 \
-    --denoise_steps 4 \
-    --ensemble_size 10 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-```
-
-```bash
-# IID (appearance model)
-python script/iid/run.py \
-    --checkpoint prs-eth/marigold-iid-appearance-v1-1 \
-    --denoise_steps 4 \
-    --ensemble_size 1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-
-# IID (lighting model)
-python script/iid/run.py \
-    --checkpoint prs-eth/marigold-iid-lighting-v1-1 \
-    --denoise_steps 4 \
-    --ensemble_size 1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-```
-
-```bash
-# Depth (the original CVPR version)
-python script/depth/run.py \
-    --checkpoint prs-eth/marigold-depth-v1-0 \
-    --denoise_steps 50 \
-    --ensemble_size 10 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-```
 
 You can find all results in the `output` directory. Enjoy!
- --> -->
 
 ### ⬇ Checkpoint cache
-
 By default, the checkpoint ([depth](https://huggingface.co/prs-eth/marigold-depth-v1-1), [normals](https://huggingface.co/prs-eth/marigold-normals-v1-1), [iid](https://huggingface.co/prs-eth/marigold-iid-appearance-v1-1))  is stored in the Hugging Face cache.
 The `HF_HOME` environment variable defines its location and can be overridden, e.g.:
 
 ```bash
 export HF_HOME=$(pwd)/cache
+HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download stabilityai/stable-diffusion-2
 ```
 
 Alternatively, use the following script to download the checkpoint weights locally:
@@ -257,175 +146,57 @@ Alternatively, use the following script to download the checkpoint weights local
 ```bash
 bash script/download_weights.sh marigold-depth-v1-1           # depth checkpoint
 ```
-<!-- bash script/download_weights.sh marigold-normals-v1-1         # normals checkpoint
-bash script/download_weights.sh marigold-iid-appearance-v1-1  # iid appearance checkpoint
-bash script/download_weights.sh marigold-iid-lighting-v1-1    # iid lighting checkpoint
-# bash script/download_weights.sh marigold-depth-v1-0         # CVPR depth checkpoint -->
-<!-- At inference, specify the checkpoint path:
-
-```bash
-# Depth
-python script/depth/run.py \
-    --checkpoint checkpoint/marigold-depth-v1-1 \
-    --denoise_steps 4 \
-    --ensemble_size 1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-```
-
-```bash
-# Normals
-python script/normals/run.py \
-    --checkpoint checkpoint/marigold-normals-v1-1 \
-    --denoise_steps 4 \
-    --ensemble_size 1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-```
-
-```bash
-# IID (appearance model)
-python script/iid/run.py \
-    --checkpoint checkpoint/marigold-iid-appearance-v1-1 \
-    --denoise_steps 4 \
-    --ensemble_size 1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-
-# IID (lighting model)
-python script/iid/run.py \
-    --checkpoint checkpoint/marigold-iid-lighting-v1-1 \
-    --denoise_steps 4 \
-    --ensemble_size 1 \
-    --input_rgb_dir input/in-the-wild_example \
-    --output_dir output/in-the-wild_example
-``` -->
-
 ## 🦿 Evaluation on test datasets <a name="evaluation"></a>
 Install additional dependencies:
 
 ```bash
 pip install -r requirements+.txt -r requirements.txt
-``` 
-
-Set data directory variable (also needed in evaluation scripts) and download the evaluation datasets ([depth](https://share.phys.ethz.ch/~pf/bingkedata/marigold/evaluation_dataset), [normals](https://share.phys.ethz.ch/~pf/bingkedata/marigold/marigold_normals/evaluation_dataset)) into the corresponding subfolders:
-
-```bash
-export BASE_DATA_DIR=<YOUR_DATA_DIR>  # Set target data directory
-
-# Depth
-wget -r -np -nH --cut-dirs=4 -R "index.html*" -P ${BASE_DATA_DIR} https://share.phys.ethz.ch/~pf/bingkedata/marigold/evaluation_dataset/
-
-# Normals
-wget -r -np -nH --cut-dirs=4 -R "index.html*" -P ${BASE_DATA_DIR} https://share.phys.ethz.ch/~pf/bingkedata/marigold/marigold_normals/evaluation_dataset.zip
-unzip ${BASE_DATA_DIR}/evaluation_dataset.zip -d ${BASE_DATA_DIR}/
-rm -f ${BASE_DATA_DIR}/evaluation_dataset.zip
 ```
-For download instructions of the intrinsic image decomposition test data, please refer to [iid-appearance instructions](script/iid/dataset_preprocess/interiorverse_appearance/README.md) and [iid-lighting instructions](script/iid/dataset_preprocess/hypersim_lighting/README.md). 
+
+Set data directory variable (also needed in evaluation scripts) and download the evaluation datasets into the corresponding subfolders.
 
 Run inference and evaluation scripts, for example:
-<!-- bash script/depth/eval/11_infer_nyu.sh  # Run inference
-bash script/depth/eval/12_eval_nyu.sh   # Evaluate predictions -->
 ```bash
-# Depth
 bash script/depth/eval/21_infer_kitti.sh
+```
+
+```bash
 bash script/depth/eval/22_eval_kitti.sh
 ```
-
-<!-- ```bash
-# Normals
-bash script/normals/eval/11_infer_scannet.sh  # Run inference
-bash script/normals/eval/12_eval_scannet.sh   # Evaluate predictions
-```
-
-```bash
-# IID
-bash script/iid/eval/11_infer_appearance_interiorverse.sh  # Run inference
-bash script/iid/eval/12_eval_appearance_interiorverse.sh   # Evaluate predictions
-
-bash script/iid/eval/21_infer_lighting_hypersim.sh  # Run inference
-bash script/iid/eval/22_eval_lighting_hypersim.sh   # Evaluate predictions
-```
-
-```bash
-# Depth (the original CVPR version)
-bash script/depth/eval_old/11_infer_nyu.sh  # Run inference
-bash script/depth/eval_old/12_eval_nyu.sh   # Evaluate predictions
-``` -->
-
 Note: although the seed has been set, the results might still be slightly different on different hardware.
 
 ## 🏋️ Training
-
 Based on the previously created environment, install extended requirements:
-
 ```bash
 pip install -r requirements++.txt -r requirements+.txt -r requirements.txt
 ```
-
 Set environment parameters for the data directory:
-
 ```bash
 export BASE_DATA_DIR=YOUR_DATA_DIR        # directory of training data
 export BASE_CKPT_DIR=YOUR_CHECKPOINT_DIR  # directory of pretrained checkpoint
 ```
-
 Download Stable Diffusion v2 [checkpoint](https://huggingface.co/stabilityai/stable-diffusion-2) into `${BASE_CKPT_DIR}`
 
 ### Prepare for training data
 **Depth**
-
 Prepare for [Hypersim](https://github.com/apple/ml-hypersim) and [Virtual KITTI 2](https://europe.naverlabs.com/research/computer-vision/proxy-virtual-worlds-vkitti-2/) datasets and save into `${BASE_DATA_DIR}`. Please refer to [this README](script/depth/dataset_preprocess/hypersim/README.md) for Hypersim preprocessing.
 
 **Normals**
-
 Prepare for [Hypersim](https://github.com/apple/ml-hypersim), [Interiorverse](https://interiorverse.github.io/) and [Sintel](http://sintel.is.tue.mpg.de/) datasets and save into `${BASE_DATA_DIR}`. Please refer to [this README](script/normals/dataset_preprocess/hypersim/README.md) for Hypersim preprocessing, [this README](script/normals/dataset_preprocess/interiorverse/README.md) for Interiorverse and [this README](script/normals/dataset_preprocess/sintel/README.md) for Sintel.
 
 **Intrinsic Image Decomposition**
-
 *Appearance model*: Prepare for [Interiorverse](https://interiorverse.github.io/) dataset and save into `${BASE_DATA_DIR}`. Please refer to [this README](script/iid/dataset_preprocess/interiorverse_appearance/README.md) for Interiorverse preprocessing.
 
 *Lighting model*: Prepare for [Hypersim](https://github.com/apple/ml-hypersim) dataset and save into `${BASE_DATA_DIR}`. Please refer to [this README](script/iid/dataset_preprocess/hypersim_lighting/README.md) for Hypersim preprocessing.
 
-
 ### Run training script
-
 ```bash
-# Depth
 python script/depth/train.py --config config/train_marigold_depth.yaml
 ```
-
-```bash
-# Normals
-python script/normals/train.py --config config/train_marigold_normals.yaml
-```
-
-```bash
-# IID (appearance model)
-python script/iid/train.py --config config/train_marigold_iid_appearance.yaml
-
-# IID (lighting model)
-python script/iid/train.py --config config/train_marigold_iid_lighting.yaml
-```
-
 Resume from a checkpoint, e.g.:
 
 ```bash
-# Depth
-python script/depth/train.py --resume_run output/marigold_base/checkpoint/latest
-```
-
-```bash
-# Normals
-python script/normals/train.py --resume_run output/train_marigold_normals/checkpoint/latest
-```
-
-```bash
-# IID (appearance model)
-python script/iid/train.py --resume_run output/train_marigold_iid_appearance/checkpoint/latest
-
-# IID (lighting model)
-python script/iid/train.py --resume_run output/train_marigold_iid_lighting/checkpoint/latest
+python script/depth/train.py --resume_run output/train_marigold_depth/checkpoint/latest
 ```
 
 ### Compose checkpoint:
@@ -439,16 +210,6 @@ Then refer to [this section](#evaluation) for evaluation.
 ## ✏️ Contributing
 
 Please refer to [this](CONTRIBUTING.md) instruction.
-
-## 🤔 Troubleshooting
-
-| Problem                                                                                                                                      | Solution                                                       |
-|----------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
-| (Windows) Invalid DOS bash script on WSL                                                                                                     | Run `dos2unix <script_name>` to convert script format          |
-| (Windows) error on WSL: `Could not load library libcudnn_cnn_infer.so.8. Error: libcuda.so: cannot open shared object file: No such file or directory` | Run `export LD_LIBRARY_PATH=/usr/lib/wsl/lib:$LD_LIBRARY_PATH` |
-| Training takes a long time to start | Use folders for data instead of tar files (modification in config files is required).  |
-
-
 
 ## 🎓 Citation
 

@@ -249,7 +249,9 @@ class MarigoldDepthTrainer:
                         invalid_mask.float(), 8, 8
                     ).bool()
                     valid_mask_down = valid_mask_down.repeat((1, 4, 1, 1))
-
+                    num_true = (valid_mask_down).sum().item()
+                    print(f"Number of True elements in batch[{self.gt_mask_type}]: {num_true}")
+                    
                 batch_size = rgb.shape[0]
 
                 with torch.no_grad():
@@ -330,7 +332,10 @@ class MarigoldDepthTrainer:
                         model_pred[valid_mask_down].float(),
                         target[valid_mask_down].float(),
                     )
+                    # num_true = (valid_mask_down).sum().item()
+                    # print(f"Number of True elements in batch[{self.gt_mask_type}]: {num_true}")
                 else:
+    
                     latent_loss = self.loss(model_pred.float(), target.float())
 
                 loss = latent_loss.mean()
@@ -446,9 +451,9 @@ class MarigoldDepthTrainer:
         ):
             self.save_checkpoint(ckpt_name="latest", save_train_state=True)
 
-        # Visualization
-        if self.vis_period > 0 and 0 == self.effective_iter % self.vis_period:
-            self.visualize()
+        # # Visualization
+        # if self.vis_period > 0 and 0 == self.effective_iter % self.vis_period:
+        #     self.visualize()
 
     def validate(self):
         for i, val_loader in enumerate(self.val_loaders):
