@@ -286,14 +286,7 @@ if "__main__" == __name__:
         depth_transform=depth_transform,
         join_split=False,
     )
-    # demo = train_dataset[-10]
-    # for k, v in demo.items():
-    #     print(k)
-    #     if isinstance(v, torch.Tensor):
-    #         print(v.shape)
-    #     else:
-    #         print(v)
-    
+
     logging.debug("Augmentation: ", cfg.augmentation)
     
     if "mixed" == cfg_data.train.name:

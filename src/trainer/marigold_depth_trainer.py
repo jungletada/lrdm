@@ -241,7 +241,7 @@ class MarigoldDepthTrainer:
                 # Get data
                 rgb = batch["rgb_norm"].to(device)
                 depth_gt_for_latent = batch[self.gt_depth_type].to(device)
-
+                
                 if self.gt_mask_type is not None:
                     valid_mask_for_latent = batch[self.gt_mask_type].to(device)
                     invalid_mask = ~valid_mask_for_latent
@@ -332,8 +332,6 @@ class MarigoldDepthTrainer:
                         model_pred[valid_mask_down].float(),
                         target[valid_mask_down].float(),
                     )
-                    # num_true = (valid_mask_down).sum().item()
-                    # print(f"Number of True elements in batch[{self.gt_mask_type}]: {num_true}")
                 else:
     
                     latent_loss = self.loss(model_pred.float(), target.float())

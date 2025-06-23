@@ -45,7 +45,7 @@ multi_res_noise:
   annealed: true
   downscale_strategy: original
 
-gt_depth_type: depth_raw_norm
+gt_depth_type: depth_filled_norm
 gt_mask_type: null # valid_mask_raw
 
 max_epoch: 10000  # a large enough number

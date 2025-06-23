@@ -28,14 +28,17 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
             # KITTI data parameter
             min_depth=1e-6,
             max_depth=80,
-            has_filled_depth=False,
+            has_filled_depth=True,
             name_mode=DepthFileNameMode.id,
             **kwargs)
         
         self.weather_opt = WeatherOption()
         self.rgb_path = 'rgb'
         self.depth_path = 'depth'
-        
+        self.filled_depth_path = 'align_depth'
+
+        self.KB_CROP_HEIGHT = 352
+        self.KB_CROP_WIDTH = 1216
         self.kitti_bm_crop = kitti_bm_crop
         self.valid_mask_crop = valid_mask_crop
         assert self.valid_mask_crop in [
@@ -45,11 +48,15 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
         ], f"Unknown crop type: {self.valid_mask_crop}"
         # Filter out empty depth
         self.filenames = [f for f in self.filenames if "None" != f[1]]
-
+        
         self.rgb_files = [os.path.join(self.rgb_path, filename_line[0][11:])
                           for filename_line in self.filenames]
         self.depth_files = [os.path.join(self.depth_path, filename_line[1])
                           for filename_line in self.filenames]
+        
+        self.aligned_depth_files = [os.path.join(self.filled_depth_path, filename_line[0][11:])
+                          for filename_line in self.filenames]
+        
         self.filled = [filename_line[2] for filename_line in self.filenames]
         
         self.rain_files = [os.path.join(self.weather_opt.rain_path[0], 
@@ -94,7 +101,7 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
         depth_raw = self._read_depth_file(depth_rel_path).squeeze()
         depth_raw_linear = torch.from_numpy(depth_raw.copy()).float().unsqueeze(0)  # [1, H, W]
         depth_data["depth_raw_linear"] = depth_raw_linear.clone()
-
+        
         if self.has_filled_depth:
             depth_filled = self._read_depth_file(filled_rel_path).squeeze()
             depth_filled_linear = torch.from_numpy(depth_filled.copy()).float().unsqueeze(0)
@@ -103,9 +110,16 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
             depth_data["depth_filled_linear"] = depth_raw_linear.clone()
 
         if self.kitti_bm_crop:
-            depth_data = {
-                k: self.kitti_benchmark_crop(v) for k, v in depth_data.items()
-            }
+            depth_data["depth_raw_linear"] = self.kitti_benchmark_crop(depth_data["depth_raw_linear"])
+            # # print("Crop!")
+            # if depth_data["depth_filled_linear"].shape[1] == self.KB_CROP_HEIGHT and \
+            #     depth_data["depth_filled_linear"].shape[2] == self.KB_CROP_WIDTH: # if filled_depth has been cropped
+            #     depth_data["depth_raw_linear"] = self.kitti_benchmark_crop(depth_data["depth_raw_linear"])
+            #     # print("OK.")
+            # else:
+            #     depth_data = {
+            #         k: self.kitti_benchmark_crop(v) for k, v in depth_data.items()
+            #     }
         return depth_data
     
     @staticmethod
@@ -164,25 +178,26 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
 class WeatherKITTIDepthMixedDataset(WeatherKITTIDepthDataset):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # self.mix_filenames = self.rgb_files + self.rain_files + self.raingan_files + \
-        #                         self.fog1_files + self.fog2_files + self.snow_files + self.snowgan_files
-        self.rgb_files = self.rgb_files # * (self.weather_opt.num_domains + 1)
-        self.depth_files = self.depth_files # * (self.weather_opt.num_domains + 1)
+        self.mix_filenames = self.rgb_files + self.rain_files + self.raingan_files + \
+                                self.fog1_files + self.fog2_files + self.snow_files + self.snowgan_files
+        # self.rgb_files = self.rgb_files * (self.weather_opt.num_domains + 1)
+        self.depth_files = self.depth_files * (self.weather_opt.num_domains + 1)
+        self.aligned_depth_files = self.aligned_depth_files * (self.weather_opt.num_domains + 1)
         # print(len(self.mix_filenames), len(self.depth_files))
 
     def __len__(self):
         # mix_filenames
-        return len(self.rgb_files)
+        return len(self.mix_filenames)
     
     def _get_data_path(self, index):
-        rgb_rel_path = self.rgb_files[index]
+        rgb_rel_path = self.mix_filenames[index]
         # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
         depth_rel_path, filled_rel_path = None, None
         if DatasetMode.RGB_ONLY != self.mode:
             # e.g., depth/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
             depth_rel_path = self.depth_files[index]
             if self.has_filled_depth:          
-                filled_rel_path = self.filled[index]  # e.g., 721.5377
+                filled_rel_path = self.aligned_depth_files[index]  # e.g., 721.5377
         # print(rgb_rel_path, depth_rel_path, filled_rel_path)
         return rgb_rel_path, depth_rel_path, filled_rel_path
 

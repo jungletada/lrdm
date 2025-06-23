@@ -55,7 +55,7 @@ class DepthFileNameMode(Enum):
     rgb_i_d = 4
 
 
-class BaseDepthDataset(Dataset):
+class  BaseDepthDataset(Dataset):
     def __init__(
         self,
         mode: DatasetMode,
@@ -122,8 +122,7 @@ class BaseDepthDataset(Dataset):
 
     def _get_data_item(self, index):
         rgb_rel_path, depth_rel_path, filled_rel_path = self._get_data_path(index=index)
-        rasters = {}
-        # RGB data
+        rasters = {}# RGB data
         rasters.update(self._load_rgb_data(rgb_rel_path=rgb_rel_path))
 
         # Depth data

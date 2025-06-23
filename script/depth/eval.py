@@ -40,6 +40,7 @@ import torch
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
+from PIL import Image
 from omegaconf import OmegaConf
 from tabulate import tabulate
 import matplotlib.pyplot as plt
@@ -57,6 +58,7 @@ from src.util.alignment import (
     disparity2depth,
 )
 from src.util.metric import MetricTracker
+
 
 eval_metrics = [
     "abs_relative_difference",
@@ -215,7 +217,10 @@ if "__main__" == __name__:
         
         # Save depth_pred_ts and depth_raw_ts as heatmap PNGs
         def save_heatmap(tensor, filename):
-            arr = tensor.cpu().numpy()
+            if isinstance(tensor, torch.Tensor):
+                arr = tensor.cpu().numpy()
+            else:
+                arr = tensor
             plt.figure()
             plt.axis('off')
             plt.imshow(arr, cmap="Spectral")
@@ -225,16 +230,31 @@ if "__main__" == __name__:
             plt.savefig(filename, bbox_inches='tight', pad_inches=0)
             plt.close()
 
-        # Save predicted and ground truth depth as heatmaps
+        # # Save predicted and ground truth depth as heatmaps
+        # valid_mask_1 = valid_mask.squeeze()
+        # depth_raw_1 = depth_raw.squeeze()
+        # # Create aligned_depth subdirectory and save aligned depth maps there
+        # aligned_depth_dir = os.path.join(args.output_dir, "aligned_depth_rgb")
+        # aligned_pred_path = os.path.join(aligned_depth_dir, pred_name)
+        # # Ensure the full directory structure exists
+        # os.makedirs(os.path.dirname(aligned_pred_path), exist_ok=True)
+        # # print(f"{valid_mask_1.shape}, {depth_raw_1.shape}, {aligned_pred_path}")
+        # aligned_depth = valid_mask_1 * depth_raw_1 + (1 - valid_mask_1) * depth_pred
+        # aligned_depth_png_path = aligned_pred_path.replace('.npy', '.png').replace('pred_', '')
+        # os.makedirs(os.path.dirname(aligned_depth_png_path), exist_ok=True)
+        # Image.fromarray((aligned_depth * 256.0).astype(np.uint16)).save(aligned_depth_png_path)
+        
+        #np.save(aligned_pred_path, aligned_depth)
+
         pred_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_pred.png'))
         gt_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_gt.png'))
-        save_heatmap(depth_pred_ts.squeeze(), pred_heatmap_path)
+        save_heatmap(depth_pred, pred_heatmap_path)
         save_heatmap(torch.from_numpy(depth_raw).to(device).squeeze(), gt_heatmap_path)
         
         for met_func in metric_funcs:
             _metric_name = met_func.__name__
             _metric = met_func(depth_pred_ts, depth_raw_ts, valid_mask_ts).item()
-            sample_metric.append(_metric.__str__())
+            sample_metric.append(str(_metric))
             metric_tracker.update(_metric_name, _metric)
 
         # Save per-sample metric
