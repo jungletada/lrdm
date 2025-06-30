@@ -42,7 +42,7 @@ class ScanNetDepthDataset(BaseDepthDataset):
             min_depth=1e-3,
             max_depth=10,
             has_filled_depth=False,
-            name_mode=DepthFileNameMode.id,
+            name_mode=DepthFileNameMode.id_,
             **kwargs,
         )
 

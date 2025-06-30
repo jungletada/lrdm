@@ -48,7 +48,7 @@ class DIODEDepthDataset(BaseDepthDataset):
             min_depth=0.6,
             max_depth=350,
             has_filled_depth=False,
-            name_mode=DepthFileNameMode.id,
+            name_mode=DepthFileNameMode.id_,
             **kwargs,
         )
 

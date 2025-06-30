@@ -29,7 +29,7 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
             min_depth=1e-6,
             max_depth=80,
             has_filled_depth=True,
-            name_mode=DepthFileNameMode.id,
+            name_mode=DepthFileNameMode.id_,
             **kwargs)
         
         self.weather_opt = WeatherOption()

@@ -48,7 +48,7 @@ class ETH3DDepthDataset(BaseDepthDataset):
             min_depth=1e-5,
             max_depth=torch.inf,
             has_filled_depth=False,
-            name_mode=DepthFileNameMode.id,
+            name_mode=DepthFileNameMode.id_,
             **kwargs,
         )
 

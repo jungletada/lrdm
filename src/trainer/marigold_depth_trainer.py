@@ -56,6 +56,13 @@ from src.util.metric import MetricTracker
 from src.util.multi_res_noise import multi_res_noise_like
 from src.util.seeding import generate_seed_sequence
 
+# Import safetensors for loading .safetensors files
+try:
+    from safetensors import safe_open
+    SAFETENSORS_AVAILABLE = True
+except ImportError:
+    SAFETENSORS_AVAILABLE = False
+
 
 class MarigoldDepthTrainer:
     def __init__(
@@ -668,16 +675,36 @@ class MarigoldDepthTrainer:
     ):
         logging.info(f"Loading checkpoint from: {ckpt_path}")
         # Load UNet
-        _model_path = os.path.join(ckpt_path, "unet", "diffusion_pytorch_model.bin")
-        self.model.unet.load_state_dict(
-            torch.load(_model_path, map_location=self.device)
-        )
+        _model_path = os.path.join(ckpt_path, "unet", "diffusion_pytorch_model.safetensors")
+        
+        # Check if safetensors file exists, otherwise try .bin file
+        if not os.path.exists(_model_path):
+            _model_path = os.path.join(ckpt_path, "unet", "diffusion_pytorch_model.bin")
+        
+        if not os.path.exists(_model_path):
+            raise FileNotFoundError(f"Model file not found at {_model_path}")
+        
+        # Load model weights based on file type
+        if _model_path.endswith('.safetensors'):
+            if not SAFETENSORS_AVAILABLE:
+                raise ImportError("safetensors library is required to load .safetensors files")
+            
+            # Load using safetensors
+            state_dict = {}
+            with safe_open(_model_path, framework="pt", device='cpu') as f:
+                for key in f.keys():
+                    state_dict[key] = f.get_tensor(key)
+        else:
+            # Load using torch.load for .bin files
+            state_dict = torch.load(_model_path, map_location='cpu')
+        
+        self.model.unet.load_state_dict(state_dict)
         self.model.unet.to(self.device)
         logging.info(f"UNet parameters are loaded from {_model_path}")
 
         # Load training states
         if load_trainer_state:
-            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"))
+            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"), weights_only=True)
             self.effective_iter = checkpoint["effective_iter"]
             self.epoch = checkpoint["epoch"]
             self.n_batch_in_epoch = checkpoint["n_batch_in_epoch"]

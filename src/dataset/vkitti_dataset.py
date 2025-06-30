@@ -46,7 +46,7 @@ class VirtualKITTIDepthDataset(BaseDepthDataset):
             min_depth=1e-5,
             max_depth=80,  # 655.35
             has_filled_depth=False,
-            name_mode=DepthFileNameMode.id,
+            name_mode=DepthFileNameMode.id_,
             **kwargs,
         )
         self.kitti_bm_crop = kitti_bm_crop

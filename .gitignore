@@ -9,6 +9,8 @@
 /venv
 /cache
 kitti/
+hypersim/
+hypersim-compress/
 *.tar
 *.zip
 **/.ipynb_checkpoints/

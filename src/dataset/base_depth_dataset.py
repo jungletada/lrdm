@@ -49,13 +49,14 @@ class DatasetMode(Enum):
 
 class DepthFileNameMode(Enum):
     """Prediction file naming modes"""
-    id = 1  # id.png
+    id_ = 1  # id.png
     rgb_id = 2  # rgb_id.png
     i_d_rgb = 3  # i_d_1_rgb.png
     rgb_i_d = 4
+    origin = 5
 
 
-class  BaseDepthDataset(Dataset):
+class BaseDepthDataset(Dataset):
     def __init__(
         self,
         mode: DatasetMode,
@@ -269,10 +270,12 @@ def get_pred_name(rgb_basename, name_mode, suffix=".png"):
         pred_basename = "pred_" + rgb_basename.split("_")[1]
     elif DepthFileNameMode.i_d_rgb == name_mode:
         pred_basename = rgb_basename.replace("_rgb.", "_pred.")
-    elif DepthFileNameMode.id == name_mode:
+    elif DepthFileNameMode.id_ == name_mode:
         pred_basename = "pred_" + rgb_basename
     elif DepthFileNameMode.rgb_i_d == name_mode:
         pred_basename = "pred_" + "_".join(rgb_basename.split("_")[1:])
+    elif DepthFileNameMode.origin == name_mode:
+        pred_basename = rgb_basename
     else:
         raise NotImplementedError
     # change suffix
