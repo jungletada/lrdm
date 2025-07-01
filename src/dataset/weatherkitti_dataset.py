@@ -77,6 +77,34 @@ class WeatherKITTIDepthDataset(BaseDepthDataset):
         self.snowgan_files = [os.path.join(self.weather_opt.snowgan_path[0], 
                                            filename_line[0][11:].replace('data', self.weather_opt.snowgan_path[1]))
                           for filename_line in self.filenames]
+        
+        # filenames = [self.rgb_files, 
+        #              self.depth_files, 
+        #              self.aligned_depth_files, 
+        #              self.rain_files, 
+        #              self.raingan_files, 
+        #              self.fog1_files, 
+        #              self.fog2_files, 
+        #              self.snow_files, 
+        #              self.snowgan_files]
+        
+        # for idx, filen in enumerate(filenames):
+        #     txt_filename = f"filen_{idx}.txt"
+        #     with open(txt_filename, "w") as f:
+        #         for item in filen:
+        #             f.write(str(item) + "\n")
+                    
+        # import shutil
+        # for idx, filen in enumerate(filenames):
+        #     txt_filename = f"filen_{idx}.txt"
+        #     with open(txt_filename, "r") as f:
+        #         for line in f:
+        #             rel_path = line.strip()
+        #             src = os.path.join("data/kitti", rel_path)
+        #             dst = os.path.join("kitti", rel_path)
+        #             os.makedirs(os.path.dirname(dst), exist_ok=True)
+        #             if os.path.exists(src):
+        #                 shutil.copy2(src, dst)
 
     def _read_depth_file(self, rel_path):
         depth_in = self._read_image(rel_path)
