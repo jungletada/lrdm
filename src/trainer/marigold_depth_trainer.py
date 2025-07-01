@@ -91,7 +91,7 @@ class MarigoldDepthTrainer:
         self.val_loaders: List[DataLoader] = val_dataloaders
         self.vis_loaders: List[DataLoader] = vis_dataloaders
         self.accumulation_steps: int = accumulation_steps
-
+        self.noise_range = [0, 0.25]
         # Adapt input layers
         if 8 != self.model.unet.config["in_channels"]:
             self._replace_unet_conv_in()
@@ -222,7 +222,7 @@ class MarigoldDepthTrainer:
             logging.info(
                 "Last evaluation was not finished, will do evaluation before continue training."
             )
-            self.validate()
+            # self.validate()
 
         self.train_metrics.reset()
         accumulated_step = 0
@@ -247,6 +247,7 @@ class MarigoldDepthTrainer:
 
                 # Get data
                 rgb = batch["rgb_norm"].to(device)
+        
                 depth_gt_for_latent = batch[self.gt_depth_type].to(device)
                 
                 if self.gt_mask_type is not None:
@@ -256,8 +257,8 @@ class MarigoldDepthTrainer:
                         invalid_mask.float(), 8, 8
                     ).bool()
                     valid_mask_down = valid_mask_down.repeat((1, 4, 1, 1))
-                    num_true = (valid_mask_down).sum().item()
-                    print(f"Number of True elements in batch[{self.gt_mask_type}]: {num_true}")
+                    # num_true = (valid_mask_down).sum().item()
+                    # print(f"Number of True elements in batch[{self.gt_mask_type}]: {num_true}")
                     
                 batch_size = rgb.shape[0]
 
@@ -266,8 +267,7 @@ class MarigoldDepthTrainer:
                     rgb_latent = self.encode_rgb(rgb)  # [B, 4, h, w]
                     # Encode GT depth
                     gt_target_latent = self.encode_depth(
-                        depth_gt_for_latent
-                    )  # [B, 4, h, w]
+                        depth_gt_for_latent)  # [B, 4, h, w]
 
                 # Sample a random timestep for each image
                 timesteps = torch.randint(
@@ -282,7 +282,7 @@ class MarigoldDepthTrainer:
                 if self.apply_multi_res_noise:
                     strength = self.mr_noise_strength
                     if self.annealed_mr_noise:
-                        # calculate strength depending on t
+                        # calculate strength depending on timestep t
                         strength = strength * (timesteps / self.scheduler_timesteps)
                     noise = multi_res_noise_like(
                         gt_target_latent,
@@ -410,6 +410,222 @@ class MarigoldDepthTrainer:
             # Epoch end
             self.n_batch_in_epoch = 0
 
+    @staticmethod
+    def do_augmentation(rgb, noise_std):
+        if noise_std <= 0.02:
+            return rgb
+        noise = torch.randn_like(rgb) * noise_std
+        rgb_aug = rgb + noise
+        return rgb_aug
+    
+    def consistency_train(self, t_end=None):
+        logging.info("Start training")
+
+        device = self.device
+        self.model.to(device)
+
+        if self.in_evaluation:
+            logging.info(
+                "Last evaluation was not finished, will do evaluation before continue training."
+            )
+            # self.validate()
+
+        self.train_metrics.reset()
+        accumulated_step = 0
+
+        for epoch in range(self.epoch, self.max_epoch + 1):
+            self.epoch = epoch
+            logging.debug(f"epoch: {self.epoch}")
+
+            # Skip previous batches when resume
+            for batch in skip_first_batches(self.train_loader, self.n_batch_in_epoch):
+                self.model.unet.train()
+
+                # globally consistent random generators
+                if self.seed is not None:
+                    local_seed = self._get_next_seed()
+                    rand_num_generator = torch.Generator(device=device)
+                    rand_num_generator.manual_seed(local_seed)
+                else:
+                    rand_num_generator = None
+
+                # >>> With gradient accumulation >>>
+
+                # Get data
+                rgb = batch["rgb_norm"].to(device)
+                
+                # Use rand_num_generator to sample a float in self.noise_range
+                if rand_num_generator is not None:
+                    noise_std = torch.empty(1, device=device).uniform_(
+                        self.noise_range[0], self.noise_range[1]
+                    ).to(device)
+                else:
+                    noise_std = (torch.rand(1, generator=rand_num_generator, device=device) * \
+                        (self.noise_range[1] - self.noise_range[0]) + self.noise_range[0]).to(device)
+                    
+                rgb = self.do_augmentation(rgb, noise_std)
+
+                depth_gt_for_latent = batch[self.gt_depth_type].to(device)
+                
+                if self.gt_mask_type is not None:
+                    valid_mask_for_latent = batch[self.gt_mask_type].to(device)
+                    invalid_mask = ~valid_mask_for_latent
+                    valid_mask_down = ~torch.max_pool2d(
+                        invalid_mask.float(), 8, 8
+                    ).bool()
+                    valid_mask_down = valid_mask_down.repeat((1, 4, 1, 1))
+                    # num_true = (valid_mask_down).sum().item()
+                    # print(f"Number of True elements in batch[{self.gt_mask_type}]: {num_true}")
+                    
+                batch_size = rgb.shape[0]
+
+                with torch.no_grad():
+                    # Encode image
+                    rgb_latent = self.encode_rgb(rgb)       # [B, 4, h, w]
+                    # Encode GT depth
+                    gt_target_latent = self.encode_depth(
+                        depth_gt_for_latent)  # [B, 4, h, w]
+
+                # Sample a random timestep for each image
+                timesteps = torch.randint(
+                    0,
+                    self.scheduler_timesteps,
+                    (batch_size,),
+                    device=device,
+                    generator=rand_num_generator,
+                ).long()  # [B]
+
+                # Sample noise
+                if self.apply_multi_res_noise:
+                    strength = self.mr_noise_strength
+                    if self.annealed_mr_noise:
+                        # calculate strength depending on timestep t
+                        strength = strength * (timesteps / self.scheduler_timesteps)
+                    noise = multi_res_noise_like(
+                        gt_target_latent,
+                        strength=strength,
+                        downscale_strategy=self.mr_noise_downscale_strategy,
+                        generator=rand_num_generator,
+                        device=device,
+                    )
+                else:
+                    noise = torch.randn(
+                        gt_target_latent.shape,
+                        device=device,
+                        generator=rand_num_generator,
+                    )  # [B, 4, h, w]
+
+                # Add noise to the latents (diffusion forward process)
+                noisy_latents = self.training_noise_scheduler.add_noise(
+                    gt_target_latent, noise, timesteps
+                )  # [B, 4, h, w]
+
+                # Text embedding
+                text_embed = self.empty_text_embed.to(device).repeat(
+                    (batch_size, 1, 1)
+                )  # [B, 77, 1024]
+
+                # Concat rgb and target latents
+                cat_latents = torch.cat(
+                    [rgb_latent, noisy_latents], dim=1
+                ).float()  # [B, 8, h, w]
+                # cat_latents = cat_latents
+
+                # Predict the noise residual
+                model_pred = self.model.unet(
+                    cat_latents, timesteps, text_embed
+                ).sample  # [B, 4, h, w]
+                if torch.isnan(model_pred).any():
+                    logging.warning("model_pred contains NaN.")
+                
+                # Get the target for loss depending on the prediction type
+                if "sample" == self.prediction_type:
+                    target = gt_target_latent
+                elif "epsilon" == self.prediction_type:
+                    target = noise
+                elif "v_prediction" == self.prediction_type:
+                    target = self.training_noise_scheduler.get_velocity(
+                        gt_target_latent, noise, timesteps
+                    )
+                else:
+                    raise ValueError(f"Unknown prediction type {self.prediction_type}")
+
+                # Masked latent loss
+                if self.gt_mask_type is not None:
+                    latent_loss = self.loss(
+                        model_pred[valid_mask_down].float(),
+                        target[valid_mask_down].float(),
+                    )
+                else:
+                    latent_loss = self.loss(model_pred.float(), target.float())
+
+                loss = latent_loss.mean() # + latent_aug_loss.mean() + 0.5 * latent_cs_loss.mean()
+                loss = loss / self.gradient_accumulation_steps
+                loss.backward()
+
+                self.train_metrics.update("loss", loss.item())
+
+                accumulated_step += 1
+
+                self.n_batch_in_epoch += 1
+                # Practical batch end
+
+                # Perform optimization step
+                if accumulated_step >= self.gradient_accumulation_steps:
+                    self.optimizer.step()
+                    self.lr_scheduler.step()
+                    self.optimizer.zero_grad()
+                    accumulated_step = 0
+
+                    self.effective_iter += 1
+
+                    # Log to tensorboard
+                    accumulated_loss = self.train_metrics.result()["loss"]
+                    tb_logger.log_dict(
+                        {
+                            f"train/{k}": v
+                            for k, v in self.train_metrics.result().items()
+                        },
+                        global_step=self.effective_iter,
+                    )
+                    tb_logger.writer.add_scalar(
+                        "lr",
+                        self.lr_scheduler.get_last_lr()[0],
+                        global_step=self.effective_iter,
+                    )
+                    tb_logger.writer.add_scalar(
+                        "n_batch_in_epoch",
+                        self.n_batch_in_epoch,
+                        global_step=self.effective_iter,
+                    )
+                    logging.info(
+                        f"iter {self.effective_iter:5d} (epoch {epoch:2d}): loss={accumulated_loss:.5f}"
+                    )
+                    self.train_metrics.reset()
+
+                    # Per-step callback
+                    self._train_step_callback()
+
+                    # End of training
+                    if self.max_iter > 0 and self.effective_iter >= self.max_iter:
+                        self.save_checkpoint(
+                            ckpt_name=self._get_backup_ckpt_name(),
+                            save_train_state=False,
+                        )
+                        logging.info("Training ended.")
+                        return
+                    # Time's up
+                    elif t_end is not None and datetime.now() >= t_end:
+                        self.save_checkpoint(ckpt_name="latest", save_train_state=True)
+                        logging.info("Time is up, training paused.")
+                        return
+
+                    torch.cuda.empty_cache()
+                    # <<< Effective batch end <<<
+
+            # Epoch end
+            self.n_batch_in_epoch = 0
+
     def encode_rgb(self, image_in):
         assert len(image_in.shape) == 4 and image_in.shape[1] == 3
         latent = self.model.encode_rgb(image_in)
@@ -439,12 +655,13 @@ class MarigoldDepthTrainer:
             )
 
         _is_latest_saved = False
+        
         # Validation
         if self.val_period > 0 and 0 == self.effective_iter % self.val_period:
             self.in_evaluation = True  # flag to do evaluation in resume run if validation is not finished
             self.save_checkpoint(ckpt_name="latest", save_train_state=True)
             _is_latest_saved = True
-            self.validate()
+            # self.validate()
             self.in_evaluation = False
             self.save_checkpoint(ckpt_name="latest", save_train_state=True)
 
@@ -704,7 +921,7 @@ class MarigoldDepthTrainer:
 
         # Load training states
         if load_trainer_state:
-            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"), weights_only=True)
+            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"))
             self.effective_iter = checkpoint["effective_iter"]
             self.epoch = checkpoint["epoch"]
             self.n_batch_in_epoch = checkpoint["n_batch_in_epoch"]

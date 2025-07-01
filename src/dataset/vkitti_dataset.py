@@ -62,8 +62,7 @@ class VirtualKITTIDepthDataset(BaseDepthDataset):
 
     def _read_depth_file(self, rel_path):
         depth_in = self._read_image(rel_path)
-        # Decode vKITTI depth
-        depth_decoded = depth_in / 100.0
+        depth_decoded = depth_in / 100.0 # Decode vKITTI depth
         return depth_decoded
 
     def _load_rgb_data(self, rgb_rel_path):

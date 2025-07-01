@@ -106,7 +106,7 @@ def get_args():
         help="On Slurm cluster, do not copy data to the local scratch.",
     )
     parser.add_argument(
-        "--base_data_dir", type=str, default='data/kitti', 
+        "--base_data_dir", type=str, default='data/vkitti', 
         help="Base path to the datasets."
     )
     parser.add_argument(
@@ -136,6 +136,7 @@ if "__main__" == __name__:
         if args.base_data_dir is not None
         else os.environ["BASE_DATA_DIR"]
     )
+
     base_ckpt_dir = (
         args.base_ckpt_dir
         if args.base_ckpt_dir is not None
@@ -169,6 +170,7 @@ if "__main__" == __name__:
         os.makedirs(out_dir_run, exist_ok=True)
 
     cfg_data = cfg.dataset
+    # base_data_dir = cfg.dataset.dir
 
     # Other directories
     out_dir_ckpt = os.path.join(out_dir_run, "checkpoint")
@@ -390,6 +392,6 @@ if "__main__" == __name__:
 
     # -------------------- Training & Evaluation Loop --------------------
     try:
-        trainer.train(t_end=t_end)
+        trainer.consistency_train(t_end=t_end)
     except Exception as e:
         logging.exception(e)

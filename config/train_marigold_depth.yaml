@@ -1,7 +1,7 @@
 base_config:
 - config/logging.yaml
 - config/wandb.yaml
-- config/dataset_depth/dataset_train_weather.yaml
+- config/dataset_depth/dataset_train_vkitti.yaml
 - config/dataset_depth/dataset_val.yaml
 - config/dataset_depth/dataset_vis.yaml
 - config/model_sdv2.yaml
@@ -34,7 +34,7 @@ trainer:
   name: MarigoldDepthTrainer
   training_noise_scheduler:
     pretrained_path: marigold-depth-v1-1
-  init_seed: 2024  # use null to train w/o seeding
+  init_seed: 2025  # use null to train w/o seeding
   save_period: 50
   backup_period: 2000
   validation_period: 500
@@ -76,7 +76,7 @@ validation:
   resample_method: bilinear
   main_val_metric: abs_relative_difference
   main_val_metric_goal: minimize
-  init_seed: 2024
+  init_seed: 2025
 
 eval:
   alignment: least_square
