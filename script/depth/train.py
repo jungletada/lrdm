@@ -106,7 +106,7 @@ def get_args():
         help="On Slurm cluster, do not copy data to the local scratch.",
     )
     parser.add_argument(
-        "--base_data_dir", type=str, default='data/vkitti', 
+        "--base_data_dir", type=str, default='data/kitti', 
         help="Base path to the datasets."
     )
     parser.add_argument(

@@ -235,9 +235,9 @@ class WeatherKITTIDepthPairedDataset(WeatherKITTIDepthDataset):
         super().__init__(**kwargs)
         self.rgb_files = self.rgb_files * self.weather_opt.num_domains
         self.depth_files = self.depth_files * self.weather_opt.num_domains
+        self.aligned_depth_files = self.aligned_depth_files * self.weather_opt.num_domains
         self.mix_filenames = self.rain_files + self.raingan_files + self.fog1_files \
                         + self.fog2_files + self.snow_files + self.snowgan_files
-        print(len(self.mix_filenames), len(self.depth_files))
         
     def _get_data_path(self, index):
         rgb_rel_path = self.rgb_files[index]
@@ -248,7 +248,7 @@ class WeatherKITTIDepthPairedDataset(WeatherKITTIDepthDataset):
             # e.g., depth/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
             depth_rel_path = self.depth_files[index]
             if self.has_filled_depth:          
-                filled_rel_path = self.filled[index]  # e.g., 721.5377
+                filled_rel_path = self.aligned_depth_files[index]
         return rgb_rel_path, weather_rel_path, depth_rel_path, filled_rel_path
 
     def _get_data_item(self, index):

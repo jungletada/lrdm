@@ -92,6 +92,8 @@ class MarigoldDepthTrainer:
         self.vis_loaders: List[DataLoader] = vis_dataloaders
         self.accumulation_steps: int = accumulation_steps
         self.noise_range = [0, 0.25]
+        self.lambda_weather = 1.0
+        
         # Adapt input layers
         if 8 != self.model.unet.config["in_channels"]:
             self._replace_unet_conv_in()
@@ -453,17 +455,16 @@ class MarigoldDepthTrainer:
 
                 # Get data
                 rgb = batch["rgb_norm"].to(device)
+                weather = batch["weather_norm"].to(device)
                 
-                # Use rand_num_generator to sample a float in self.noise_range
-                if rand_num_generator is not None:
-                    noise_std = torch.empty(1, device=device).uniform_(
-                        self.noise_range[0], self.noise_range[1]
-                    ).to(device)
-                else:
-                    noise_std = (torch.rand(1, generator=rand_num_generator, device=device) * \
-                        (self.noise_range[1] - self.noise_range[0]) + self.noise_range[0]).to(device)
-                    
-                rgb = self.do_augmentation(rgb, noise_std)
+                # # Use rand_num_generator to sample a float in self.noise_range
+                # if rand_num_generator is not None:
+                #     noise_std = torch.empty(1, device=device).uniform_(
+                #         self.noise_range[0], self.noise_range[1]
+                #     ).to(device)
+                # else:
+                #     noise_std = (torch.rand(1, generator=rand_num_generator, device=device) * \
+                #         (self.noise_range[1] - self.noise_range[0]) + self.noise_range[0]).to(device)
 
                 depth_gt_for_latent = batch[self.gt_depth_type].to(device)
                 
@@ -481,7 +482,8 @@ class MarigoldDepthTrainer:
 
                 with torch.no_grad():
                     # Encode image
-                    rgb_latent = self.encode_rgb(rgb)       # [B, 4, h, w]
+                    rgb_latent = self.encode_rgb(rgb)               # [B, 4, h, w]
+                    weather_latent = self.encode_weather(weather)   # [B, 4, h, w]
                     # Encode GT depth
                     gt_target_latent = self.encode_depth(
                         depth_gt_for_latent)  # [B, 4, h, w]
@@ -529,8 +531,7 @@ class MarigoldDepthTrainer:
                 cat_latents = torch.cat(
                     [rgb_latent, noisy_latents], dim=1
                 ).float()  # [B, 8, h, w]
-                # cat_latents = cat_latents
-
+                
                 # Predict the noise residual
                 model_pred = self.model.unet(
                     cat_latents, timesteps, text_embed
@@ -559,10 +560,37 @@ class MarigoldDepthTrainer:
                 else:
                     latent_loss = self.loss(model_pred.float(), target.float())
 
-                loss = latent_loss.mean() # + latent_aug_loss.mean() + 0.5 * latent_cs_loss.mean()
+                ####################### Start for Weather #######################
+                # Concat weather and target latents
+                cat_weather_latents = torch.cat(
+                    [weather_latent, noisy_latents], dim=1
+                ).float()  # [B, 8, h, w]
+                
+                # Predict the noise residual
+                model_pred_weather = self.model.unet(
+                    cat_weather_latents, timesteps, text_embed
+                ).sample  # [B, 4, h, w]
+                if torch.isnan(model_pred_weather).any():
+                    logging.warning("model_pred_weather contains NaN.")
+                
+                # Masked latent loss
+                if self.gt_mask_type is not None:
+                    latent_loss_weather = self.loss(
+                        model_pred_weather[valid_mask_down].float(),
+                        target[valid_mask_down].float(),
+                    )
+                    latent_loss_distill = self.loss(
+                        model_pred_weather[valid_mask_down].float(),
+                        model_pred_weather[valid_mask_down].float().detach(),
+                    )
+                else:
+                    latent_loss_weather = self.loss(model_pred.float(), target.float())
+                    latent_loss_distill = self.loss(model_pred.float(), model_pred_weather.float().detach())
+                    
+                loss = latent_loss.mean() + latent_loss_weather.mean() + \
+                    self.lambda_weather * (self.effective_iter / self.max_iter) * latent_loss_distill.mean()
                 loss = loss / self.gradient_accumulation_steps
                 loss.backward()
-
                 self.train_metrics.update("loss", loss.item())
 
                 accumulated_step += 1

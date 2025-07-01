@@ -1,7 +1,7 @@
 base_config:
 - config/logging.yaml
 - config/wandb.yaml
-- config/dataset_depth/dataset_train_vkitti.yaml
+- config/dataset_depth/dataset_train_weather.yaml
 - config/dataset_depth/dataset_val.yaml
 - config/dataset_depth/dataset_vis.yaml
 - config/model_sdv2.yaml
@@ -27,7 +27,7 @@ augmentation:
 dataloader:
   num_workers: 2
   effective_batch_size: 32
-  max_train_batch_size: 2
+  max_train_batch_size: 1
   seed: 2025  # to ensure continuity when resuming from checkpoint
 
 trainer:

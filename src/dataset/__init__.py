@@ -74,8 +74,8 @@ dataset_name_class_dict = {
     "oasis_normals": OasisNormalsDataset,
     "interiorverse_iid": InteriorVerseIIDDataset,
     "hypersim_iid": HypersimIIDDataset,
-    "weather_depth_kitti": WeatherKITTIDepthMixedDataset,
-        # WeathewrKITTIDepthMixedDataset,
+    "weather_depth_kitti": WeatherKITTIDepthPairedDataset,
+    "weather_depth_kitti_eval": WeatherKITTIDepthMixedDataset,
 }
 
 
