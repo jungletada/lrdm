@@ -164,7 +164,7 @@ bash script/depth/eval/21_infer_kitti.sh
 bash script/depth/eval/22_eval_kitti.sh
 ```
 Note: although the seed has been set, the results might still be slightly different on different hardware.
-
+ 
 ## 🏋️ Training
 Based on the previously created environment, install extended requirements:
 ```bash

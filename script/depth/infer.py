@@ -225,81 +225,79 @@ if "__main__" == __name__:
     # img1 = Image.fromarray(w_np)
     # img1.save(os.path.join(output_dir, 'sample_weather.png'))
     
-    # dataloader = DataLoader(dataset, batch_size=1, num_workers=0)
+    dataloader = DataLoader(dataset, batch_size=1, num_workers=0)
 
-    # # -------------------- Model --------------------
-    # if half_precision:
-    #     dtype = torch.float16
-    #     variant = "fp16"
-    #     logging.warning(
-    #         f"Running with half precision ({dtype}), might lead to suboptimal result."
-    #     )
-    # else:
-    #     dtype = torch.float32
-    #     variant = None
+    # -------------------- Model --------------------
+    if half_precision:
+        dtype = torch.float16
+        variant = "fp16"
+        logging.warning(
+            f"Running with half precision ({dtype}), might lead to suboptimal result."
+        )
+    else:
+        dtype = torch.float32
+        variant = None
 
-    # pipe: MarigoldDepthPipeline = MarigoldDepthPipeline.from_pretrained(
-    #     checkpoint_path, 
-    #     variant=variant, 
-    #     torch_dtype=dtype,
-    # )
+    pipe: MarigoldDepthPipeline = MarigoldDepthPipeline.from_pretrained(
+        checkpoint_path, 
+        variant=variant, 
+        torch_dtype=dtype,
+    )
 
-    # try:
-    #     pipe.enable_xformers_memory_efficient_attention()
-    # except ImportError:
-    #     logging.debug("Proceeding without xformers")
+    try:
+        pipe.enable_xformers_memory_efficient_attention()
+    except ImportError:
+        logging.debug("Proceeding without xformers")
 
-    # pipe = pipe.to(device)
-    # logging.info(
-    #     f"Loaded depth pipeline: scale_invariant={pipe.scale_invariant}, shift_invariant={pipe.shift_invariant}"
-    # )
+    pipe = pipe.to(device)
+    logging.info(
+        f"Loaded depth pipeline: scale_invariant={pipe.scale_invariant}, shift_invariant={pipe.shift_invariant}"
+    )
 
     # -------------------- Inference and saving --------------------
-    # with torch.no_grad():
-    #     for batch in tqdm(
-    #         dataloader, desc=f"Depth Inference on {dataset.disp_name}", leave=True
-    #     ):
-    #         # Read input image
+    with torch.no_grad():
+        for batch in tqdm(
+            dataloader, desc=f"Depth Inference on {dataset.disp_name}", leave=True
+        ):
+            # rgb_int = batch["rgb_int"].squeeze().numpy().astype(np.uint8)  # [3, H, W]
+            # rgb_int = np.moveaxis(rgb_int, 0, -1)  # [H, W, 3]
+            # input_image = Image.fromarray(rgb_int)
             
-    #         # rgb_int = batch["rgb_int"].squeeze().numpy().astype(np.uint8)  # [3, H, W]
-    #         # rgb_int = np.moveaxis(rgb_int, 0, -1)  # [H, W, 3]
-    #         # input_image = Image.fromarray(rgb_int)
+            input_image = batch["rgb_int"]
+            # Random number generator
+            if seed is None:
+                generator = None
+            else:
+                generator = torch.Generator(device=device)
+                generator.manual_seed(seed)
             
-    #         input_image = batch["rgb_int"]
-    #         # Random number generator
-    #         if seed is None:
-    #             generator = None
-    #         else:
-    #             generator = torch.Generator(device=device)
-    #             generator.manual_seed(seed)
-            
-            # # Perform inference
-            # pipe_out: MarigoldDepthOutput = pipe(
-            #     input_image,
-            #     denoising_steps=denoise_steps,
-            #     ensemble_size=ensemble_size,
-            #     processing_res=processing_res,
-            #     match_input_res=match_input_res,
-            #     batch_size=0,
-            #     color_map=None,
-            #     show_progress_bar=False,
-            #     resample_method=resample_method,
-            #     generator=generator,
+            # Perform inference
+            pipe_out: MarigoldDepthOutput = pipe(
+                input_image,
+                denoising_steps=denoise_steps,
+                ensemble_size=ensemble_size,
+                processing_res=processing_res,
+                match_input_res=match_input_res,
+                batch_size=0,
+                color_map=None,
+                show_progress_bar=False,
+                resample_method=resample_method,
+                generator=generator,
+            )
+            depth_pred: np.ndarray = pipe_out.depth_np
+            # Save predictions
+            rgb_filename = batch["rgb_relative_path"][0]
+            rgb_basename = os.path.basename(rgb_filename)
+            scene_dir = os.path.join(output_dir, os.path.dirname(rgb_filename))
+            if not os.path.exists(scene_dir):
+                os.makedirs(scene_dir)
+            # pred_basename = get_pred_name(
+            #     rgb_basename, dataset.name_mode, suffix=".npy"
             # )
-            # depth_pred: np.ndarray = pipe_out.depth_np
-            # # Save predictions
-            # rgb_filename = batch["rgb_relative_path"][0]
-            # rgb_basename = os.path.basename(rgb_filename)
-            # scene_dir = os.path.join(output_dir, os.path.dirname(rgb_filename))
-            # if not os.path.exists(scene_dir):
-            #     os.makedirs(scene_dir)
-            # # pred_basename = get_pred_name(
-            # #     rgb_basename, dataset.name_mode, suffix=".npy"
-            # # )
-            # pred_basename = rgb_basename.replace(".png", ".npy")
+            pred_basename = rgb_basename.replace(".png", ".npy")
             
-            # save_to = os.path.join(scene_dir, pred_basename)
-            # if os.path.exists(save_to):
-            #     logging.warning(f"Existing file: '{save_to}' will be overwritten")
+            save_to = os.path.join(scene_dir, pred_basename)
+            if os.path.exists(save_to):
+                logging.warning(f"Existing file: '{save_to}' will be overwritten")
             
-            # np.save(save_to, depth_pred)
+            np.save(save_to, depth_pred)

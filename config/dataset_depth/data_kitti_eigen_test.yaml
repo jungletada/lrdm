@@ -1,4 +1,4 @@
-name: weather_depth_kitti
+name: weather_depth_kitti_eval
 disp_name: kitti_depth_eigen_test_full
 dir: data/kitti
 filenames: data_split/kitti_depth/eigen_test_files_with_gt.txt

@@ -483,7 +483,7 @@ class MarigoldDepthTrainer:
                 with torch.no_grad():
                     # Encode image
                     rgb_latent = self.encode_rgb(rgb)               # [B, 4, h, w]
-                    weather_latent = self.encode_weather(weather)   # [B, 4, h, w]
+                    weather_latent = self.encode_rgb(weather)   # [B, 4, h, w]
                     # Encode GT depth
                     gt_target_latent = self.encode_depth(
                         depth_gt_for_latent)  # [B, 4, h, w]
@@ -559,7 +559,10 @@ class MarigoldDepthTrainer:
                     )
                 else:
                     latent_loss = self.loss(model_pred.float(), target.float())
-
+                 
+                loss_rgb = latent_loss.mean() / self.gradient_accumulation_steps
+                loss_rgb.backward()
+                
                 ####################### Start for Weather #######################
                 # Concat weather and target latents
                 cat_weather_latents = torch.cat(
@@ -579,23 +582,26 @@ class MarigoldDepthTrainer:
                         model_pred_weather[valid_mask_down].float(),
                         target[valid_mask_down].float(),
                     )
-                    latent_loss_distill = self.loss(
-                        model_pred_weather[valid_mask_down].float(),
-                        model_pred_weather[valid_mask_down].float().detach(),
-                    )
+                    # latent_loss_distill = self.loss(
+                    #     model_pred_weather[valid_mask_down].float(),
+                    #     model_pred_weather[valid_mask_down].float().detach(),
+                    # )
                 else:
-                    latent_loss_weather = self.loss(model_pred.float(), target.float())
-                    latent_loss_distill = self.loss(model_pred.float(), model_pred_weather.float().detach())
-                    
-                loss = latent_loss.mean() + latent_loss_weather.mean() + \
-                    self.lambda_weather * (self.effective_iter / self.max_iter) * latent_loss_distill.mean()
-                loss = loss / self.gradient_accumulation_steps
-                loss.backward()
+                    latent_loss_weather = self.loss(model_pred_weather.float(), target.float())
+                    # latent_loss_distill = self.loss(model_pred.float(), model_pred_weather.float().detach())
+                
+                loss_weather = latent_loss_weather.mean() / self.gradient_accumulation_steps
+                # loss_distill = latent_loss_distill.mean() / self.gradient_accumulation_steps
+                loss_weather.backward()
+                
+                loss = loss_rgb + loss_weather # + \
+                    # self.lambda_weather * (self.effective_iter / self.max_iter) * loss_distill
+
                 self.train_metrics.update("loss", loss.item())
 
-                accumulated_step += 1
+                accumulated_step += 2
 
-                self.n_batch_in_epoch += 1
+                self.n_batch_in_epoch += 2
                 # Practical batch end
 
                 # Perform optimization step
