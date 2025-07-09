@@ -56,7 +56,6 @@ from .util.image_util import (
     resize_max_res,
 )
 
-
 class MarigoldDepthOutput(BaseOutput):
     """
     Output class for Marigold Monocular Depth Estimation pipeline.
