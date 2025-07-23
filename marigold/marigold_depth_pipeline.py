@@ -55,6 +55,8 @@ from .util.image_util import (
     get_tv_resample_method,
     resize_max_res,
 )
+from marigold.model.controldepth import ControlDepth
+
 
 class MarigoldDepthOutput(BaseOutput):
     """
