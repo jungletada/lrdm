@@ -355,7 +355,7 @@ if "__main__" == __name__:
     # -------------------- Model --------------------
     _pipeline_kwargs = cfg.pipeline.kwargs if cfg.pipeline.kwargs is not None else {}
     sd_model_path = os.path.join(base_ckpt_dir, cfg.model.pretrained_path)
-    print(f'sd_model_path: {sd_model_path}')
+    logging.info(f'pretrained_model_path: {sd_model_path}')
     # snapshot_download("stabilityai/stable-diffusion-2", local_dir=sd_model_path)
     model = MarigoldDepthPipeline.from_pretrained(
         sd_model_path, **_pipeline_kwargs
@@ -392,6 +392,6 @@ if "__main__" == __name__:
 
     # -------------------- Training & Evaluation Loop --------------------
     try:
-        trainer.consistency_train(t_end=t_end)
+        trainer.train(t_end=t_end)
     except Exception as e:
         logging.exception(e)

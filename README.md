@@ -191,12 +191,12 @@ Prepare for [Hypersim](https://github.com/apple/ml-hypersim), [Interiorverse](ht
 
 ### Run training script
 ```bash
-python script/depth/train.py --config config/train_marigold_depth.yaml
+python script/depth/train.py --config config/train_weather_depth.yaml
 ```
 Resume from a checkpoint, e.g.:
 
 ```bash
-python script/depth/train.py --resume_run output/train_marigold_depth/checkpoint/latest
+python script/depth/train.py --resume_run output/train_weather_depth/checkpoint/latest
 ```
 
 ### Compose checkpoint:

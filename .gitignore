@@ -16,7 +16,7 @@ hypersim-compress/
 **/.ipynb_checkpoints/
 .vscode/
 .idea
-
+__pycache__/
 # ignore these types
 *.pyc
 *.out
