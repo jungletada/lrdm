@@ -8,8 +8,8 @@ subfolder=${2:-"eval"}
 n_ensemble=${3:-2}
 
 python script/depth/infer.py \
-    --checkpoint $ckpt \
-    --seed 1234 \
+    --base_checkpoint $ckpt \
+    --seed 2025 \
     --base_data_dir data/kitti \
     --denoise_steps 2 \
     --ensemble_size ${n_ensemble} \

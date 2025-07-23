@@ -39,8 +39,11 @@ from PIL import Image
 import numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
+from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler
+from transformers import CLIPTextModel, CLIPTokenizer
 
 from marigold import MarigoldDepthPipeline, MarigoldDepthOutput
+from marigold.ramit_model.ramit import RAMiT
 from src.dataset import (
     BaseDepthDataset,
     DatasetMode,
@@ -48,6 +51,7 @@ from src.dataset import (
     get_pred_name,
 )
 from src.util.seeding import seed_all
+from safetensors.torch import load_file as safe_load_file
 
 
 def get_args():
@@ -56,9 +60,15 @@ def get_args():
         description="Marigold : Monocular Depth Estimation : Dataset Inference"
     )
     parser.add_argument(
-        "--checkpoint",
+        "--base_checkpoint",
         type=str,
         default="prs-eth/marigold-depth-v1-1",
+        help="Checkpoint path or hub name.",
+    )
+    parser.add_argument(
+        "--finetune_checkpoint",
+        type=str,
+        default="output/train_weather_depth/checkpoint/latest/unet/diffusion_pytorch_model.safetensors",
         help="Checkpoint path or hub name.",
     )
     parser.add_argument(
@@ -127,7 +137,6 @@ if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
     args = get_args()
 
-    checkpoint_path = args.checkpoint
     dataset_config = args.dataset_config
     base_data_dir = args.base_data_dir
     output_dir = args.output_dir
@@ -154,7 +163,7 @@ if "__main__" == __name__:
     # -------------------- Preparation --------------------
     # Print out config
     logging.info(
-        f"Inference settings: checkpoint = `{checkpoint_path}`, "
+        f"Inference settings: checkpoint = `{args.base_checkpoint}`, "
         f"with denoise_steps = {denoise_steps}, ensemble_size = {ensemble_size}, "
         f"processing resolution = {processing_res}, seed = {seed}; "
         f"dataset config = `{dataset_config}`."
@@ -208,23 +217,6 @@ if "__main__" == __name__:
     )
     assert isinstance(dataset, BaseDepthDataset)
     
-    # for i in range(len(dataset)):
-    #     rgb_norm = dataset[i]['rgb_int']
-    #     depth = dataset[i]['depth_filled_linear']
-    #     print(f"index {i}: {rgb_norm.shape}, {depth.shape}")
-
-    # weather_int = dataset[3100]['weather_int']
-    
-    # w_np = rgb_int.cpu().numpy().transpose(1, 2, 0)
-    # w_np = np.clip(w_np, 0, 255).astype(np.uint8)
-    # img = Image.fromarray(w_np)
-    # img.save(os.path.join(output_dir, 'sample_rgb.png'))
-    # print("save")
-    # w_np = weather_int.cpu().numpy().transpose(1, 2, 0)
-    # w_np = np.clip(w_np, 0, 255).astype(np.uint8)
-    # img1 = Image.fromarray(w_np)
-    # img1.save(os.path.join(output_dir, 'sample_weather.png'))
-    
     dataloader = DataLoader(dataset, batch_size=1, num_workers=0)
 
     # -------------------- Model --------------------
@@ -238,20 +230,39 @@ if "__main__" == __name__:
         dtype = torch.float32
         variant = None
 
-    pipe: MarigoldDepthPipeline = MarigoldDepthPipeline.from_pretrained(
-        checkpoint_path, 
-        variant=variant, 
-        torch_dtype=dtype,
+    unet = UNet2DConditionModel.from_config(args.base_checkpoint, subfolder="unet")
+    unet.conv_in = RAMiT()
+    
+    # Load the trained checkpoint weights
+    if args.finetune_checkpoint.endswith(".safetensors"):
+        state_dict = safe_load_file(args.finetune_checkpoint)
+    else:
+        state_dict = torch.load(args.finetune_checkpoint, map_location='cpu')
+    unet.load_state_dict(state_dict)
+    
+    vae = AutoencoderKL.from_pretrained(args.base_checkpoint, subfolder="vae")
+    scheduler = DDIMScheduler.from_pretrained(args.base_checkpoint, subfolder="scheduler")
+    text_encoder = CLIPTextModel.from_pretrained(args.base_checkpoint, subfolder="text_encoder")
+    tokenizer = CLIPTokenizer.from_pretrained(args.base_checkpoint, subfolder="tokenizer")
+    
+    pipeline = MarigoldDepthPipeline(
+        unet=unet,
+        vae=vae,
+        scheduler=scheduler,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        # variant=variant, 
+        # torch_dtype=dtype,
     )
 
     try:
-        pipe.enable_xformers_memory_efficient_attention()
+        pipeline.enable_xformers_memory_efficient_attention()
     except ImportError:
         logging.debug("Proceeding without xformers")
 
-    pipe = pipe.to(device)
+    pipeline = pipeline.to(device)
     logging.info(
-        f"Loaded depth pipeline: scale_invariant={pipe.scale_invariant}, shift_invariant={pipe.shift_invariant}"
+        f"Loaded depth pipeline: scale_invariant={pipeline.scale_invariant}, shift_invariant={pipeline.shift_invariant}"
     )
 
     # -------------------- Inference and saving --------------------
@@ -272,7 +283,7 @@ if "__main__" == __name__:
                 generator.manual_seed(seed)
             
             # Perform inference
-            pipe_out: MarigoldDepthOutput = pipe(
+            pipe_out: MarigoldDepthOutput = pipeline(
                 input_image,
                 denoising_steps=denoise_steps,
                 ensemble_size=ensemble_size,
