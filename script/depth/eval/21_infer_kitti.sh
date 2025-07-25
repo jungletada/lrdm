@@ -5,7 +5,8 @@ set -x
 # Use specified checkpoint path, otherwise, default value
 ckpt=${1:-"checkpoint/marigold-depth-v1-1"}
 subfolder=${2:-"eval"}
-n_ensemble=${3:-2}
+n_ensemble=${3:-1}
+
 
 python script/depth/infer.py \
     --base_checkpoint $ckpt \

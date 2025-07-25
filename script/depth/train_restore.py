@@ -1,33 +1,3 @@
-# Copyright 2023-2025 Marigold Team, ETH Zürich. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# --------------------------------------------------------------------------
-# More information about Marigold:
-#   https://marigoldmonodepth.github.io
-#   https://marigoldcomputervision.github.io
-# Efficient inference pipelines are now part of diffusers:
-#   https://huggingface.co/docs/diffusers/using-diffusers/marigold_usage
-#   https://huggingface.co/docs/diffusers/api/pipelines/marigold
-# Examples of trained models and live demos:
-#   https://huggingface.co/prs-eth
-# Related projects:
-#   https://rollingdepth.github.io/
-#   https://marigolddepthcompletion.github.io/
-# Citation (BibTeX):
-#   https://github.com/prs-eth/Marigold#-citation
-# If you find Marigold useful, we kindly ask you to cite our papers.
-# --------------------------------------------------------------------------
-
 import sys
 import os
 sys.path.insert(0, os.path.abspath(
@@ -41,21 +11,12 @@ from omegaconf import OmegaConf
 from datetime import datetime, timedelta
 
 import torch
-from torch.utils.data import ConcatDataset, DataLoader
-from huggingface_hub import hf_hub_download
-from huggingface_hub import snapshot_download
+from torch.utils.data import DataLoader
 
-from marigold import MarigoldDepthPipeline
-from src.dataset import BaseDepthDataset, DatasetMode, get_dataset
-from src.dataset.mixed_sampler import MixedBatchSampler
+from src.dataset.kitti_latent_dataset import WeatherKITTLatentDataset
 from src.trainer import get_trainer_cls
 from src.util.config_util import (
-    find_value_in_omegaconf,
     recursive_load_config,
-)
-from src.util.depth_transform import (
-    DepthNormalizerBase,
-    get_depth_normalizer,
 )
 from src.util.logging_util import (
     config_logging,
@@ -65,18 +26,19 @@ from src.util.logging_util import (
     save_wandb_job_id,
     tb_logger,
 )
-from src.util.slurm_util import get_local_scratch_dir, is_on_slurm
+
+from marigold.ramit_model.ramit import RAMiTModule
 
 
 def get_args():
      # -------------------- Arguments --------------------
     parser = argparse.ArgumentParser(
-        description="Marigold : Monocular Depth Estimation : Training"
+        description="RAMiT: Training Latent"
     )
     parser.add_argument(
         "--config",
         type=str,
-        default="config/train_marigold_depth.yaml",
+        default="config/train_rasmit_latent.yaml",
         help="Path to config file.",
     )
     parser.add_argument(
@@ -88,7 +50,9 @@ def get_args():
     parser.add_argument(
         "--output_dir", type=str, default=None, help="Directory to save checkpoints."
     )
-    parser.add_argument("--no_cuda", action="store_true", help="Do not use cuda.")
+    parser.add_argument(
+        "--no_cuda", action="store_true", help="Do not use cuda."
+    )
     parser.add_argument(
         "--exit_after",
         type=int,
@@ -169,9 +133,6 @@ if "__main__" == __name__:
             out_dir_run = os.path.join("./output", job_name)
         os.makedirs(out_dir_run, exist_ok=True)
 
-    cfg_data = cfg.dataset
-    # base_data_dir = cfg.dataset.dir
-
     # Other directories
     out_dir_ckpt = os.path.join(out_dir_run, "checkpoint")
     if not os.path.exists(out_dir_ckpt):
@@ -179,12 +140,6 @@ if "__main__" == __name__:
     out_dir_tb = os.path.join(out_dir_run, "tensorboard")
     if not os.path.exists(out_dir_tb):
         os.makedirs(out_dir_tb)
-    out_dir_eval = os.path.join(out_dir_run, "evaluation")
-    if not os.path.exists(out_dir_eval):
-        os.makedirs(out_dir_eval)
-    out_dir_vis = os.path.join(out_dir_run, "visualization")
-    if not os.path.exists(out_dir_vis):
-        os.makedirs(out_dir_vis)
 
     # -------------------- Logging settings --------------------
     config_logging(cfg.logging, out_dir=out_dir_run)
@@ -238,27 +193,6 @@ if "__main__" == __name__:
         os.system(f"rm -rf {_temp_code_dir}")
         logging.info(f"Code snapshot saved to: {_code_snapshot_path}")
 
-    # -------------------- Copy data to local scratch (Slurm) --------------------
-    if is_on_slurm() and (not args.do_not_copy_data):
-        # local scratch dir
-        original_data_dir = base_data_dir
-        base_data_dir = os.path.join(get_local_scratch_dir(), "Marigold_data")
-        # copy data
-        required_data_list = find_value_in_omegaconf("dir", cfg_data)
-        # if cfg_train.visualize.init_latent_path is not None:
-        #     required_data_list.append(cfg_train.visualize.init_latent_path)
-        required_data_list = list(set(required_data_list))
-        logging.info(f"Required_data_list: {required_data_list}")
-        for d in tqdm(required_data_list, desc="Copy data to local scratch"):
-            ori_dir = os.path.join(original_data_dir, d)
-            dst_dir = os.path.join(base_data_dir, d)
-            os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
-            if os.path.isfile(ori_dir):
-                shutil.copyfile(ori_dir, dst_dir)
-            elif os.path.isdir(ori_dir):
-                shutil.copytree(ori_dir, dst_dir)
-        logging.info(f"Data copied to: {base_data_dir}")
-
     # -------------------- Gradient accumulation steps --------------------
     eff_bs = cfg.dataloader.effective_batch_size
     accumulation_steps = eff_bs / cfg.dataloader.max_train_batch_size
@@ -277,74 +211,17 @@ if "__main__" == __name__:
         loader_generator = torch.Generator().manual_seed(loader_seed)
 
     # Training dataset
-    depth_transform: DepthNormalizerBase = get_depth_normalizer(
-        cfg_normalizer=cfg.depth_normalization
+    train_dataset = WeatherKITTLatentDataset()
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=cfg.dataloader.max_train_batch_size,
+        num_workers=cfg.dataloader.num_workers,
+        shuffle=True,
+        generator=loader_generator,
     )
-    train_dataset: BaseDepthDataset = get_dataset(
-        cfg_data.train,
-        base_data_dir=base_data_dir,
-        mode=DatasetMode.TRAIN,
-        augmentation_args=cfg.augmentation,
-        depth_transform=depth_transform,
-        join_split=False,
-    )
-
-    logging.debug("Augmentation: ", cfg.augmentation)
     
-    if "mixed" == cfg_data.train.name:
-        dataset_ls = train_dataset
-        assert len(cfg_data.train.prob_ls) == len(
-            dataset_ls
-        ), "Lengths don't match: `prob_ls` and `dataset_list`"
-        concat_dataset = ConcatDataset(dataset_ls)
-        mixed_sampler = MixedBatchSampler(
-            src_dataset_ls=dataset_ls,
-            batch_size=cfg.dataloader.max_train_batch_size,
-            drop_last=True,
-            prob=cfg_data.train.prob_ls,
-            shuffle=True,
-            generator=loader_generator,
-        )
-        train_loader = DataLoader(
-            concat_dataset,
-            batch_sampler=mixed_sampler,
-            num_workers=cfg.dataloader.num_workers,
-        )
-    
-    else:
-        train_loader = DataLoader(
-            dataset=train_dataset,
-            batch_size=cfg.dataloader.max_train_batch_size,
-            num_workers=cfg.dataloader.num_workers,
-            shuffle=True,
-            generator=loader_generator,
-        )
-    # Validation dataset
-    val_loaders: List[DataLoader] = []
-    for _val_dict in cfg_data.val:
-        _val_dataset = get_dataset(
-            _val_dict,
-            base_data_dir=base_data_dir,
-            mode=DatasetMode.EVAL,
-            join_split=False,
-        )
-        _val_loader = DataLoader(
-            dataset=_val_dataset,
-            batch_size=1,
-            shuffle=False,
-            num_workers=cfg.dataloader.num_workers,
-        )
-        val_loaders.append(_val_loader)
-
     # -------------------- Model --------------------
-    _pipeline_kwargs = cfg.pipeline.kwargs if cfg.pipeline.kwargs is not None else {}
-    sd_model_path = os.path.join(base_ckpt_dir, cfg.model.pretrained_path)
-    logging.info(f'pretrained_model_path: {sd_model_path}')
-    # snapshot_download("stabilityai/stable-diffusion-2", local_dir=sd_model_path)
-    model = MarigoldDepthPipeline.from_pretrained(
-        sd_model_path, **_pipeline_kwargs
-    )
-
+    model = RAMiTModule()
     # -------------------- Trainer --------------------
     # Exit time
     if args.exit_after > 0:
@@ -361,11 +238,7 @@ if "__main__" == __name__:
         train_dataloader=train_loader,
         device=device,
         out_dir_ckpt=out_dir_ckpt,
-        out_dir_eval=out_dir_eval,
-        out_dir_vis=out_dir_vis,
         accumulation_steps=accumulation_steps,
-        val_dataloaders=val_loaders,
-        vis_dataloaders=None,
     )
 
     # -------------------- Checkpoint --------------------

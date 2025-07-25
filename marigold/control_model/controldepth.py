@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
-from diffusers import UNet2DConditionModel, UNet2DConditionOutput
+# from diffusers import UNet2DConditionModel, UNet2DConditionOutput
 
 
 class ControlDepth(UNet2DConditionModel):

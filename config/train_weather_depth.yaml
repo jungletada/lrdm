@@ -14,6 +14,8 @@ pipeline:
     default_denoising_steps: 4
     default_processing_resolution: 768
 
+ramit_path: output/train_rasmit_latent/checkpoint/iter_020000/ramit.pth
+
 depth_normalization:
   type: scale_shift_depth
   clip: true
@@ -50,7 +52,7 @@ gt_depth_type: depth_filled_norm
 gt_mask_type: null # valid_mask_raw
 
 max_epoch: 10000  # a large enough number
-max_iter: 20000   # usually converges at around 20k
+max_iter: 10000   # usually converges at around 10k
 
 optimizer:
   name: Adam
@@ -64,7 +66,7 @@ lr: 3.0e-05
 lr_scheduler:
   name: IterExponential
   kwargs:
-    total_iter: 25000
+    total_iter: 10000
     final_ratio: 0.01
     warmup_steps: 100
 

@@ -48,7 +48,6 @@ def make_model(args, opts, pe):
 class ShallowModule(nn.Module):
     def __init__(self, in_chans, out_chans, kernel_size=3, stride=1):
         super(ShallowModule, self).__init__()
-        
         self.in_chans = in_chans
         self.out_chans = out_chans
         self.kernel_size = kernel_size
@@ -501,8 +500,9 @@ class HRAMi(nn.Module):
 
     
 class Reconstruction(nn.Module):
-    def __init__(self, target_mode, dim, kernel_size=3, stride=1, num_mv=2, mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
+    def __init__(self, out_chans, dim, kernel_size=3, stride=1, num_mv=2, mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
         super(Reconstruction, self).__init__()
+        
         self.mobivari = nn.ModuleList()
         for i in range(num_mv):
             if mv_ver==1:
@@ -511,7 +511,7 @@ class Reconstruction(nn.Module):
                 self.mobivari.add_module(f'mobivari{i}', MobiVari2(dim, kernel_size, stride, mv_act, None, exp_factor, expand_groups))
         
         self.conv = nn.Conv2d(dim, dim, kernel_size, stride, kernel_size//2)
-        self.final_conv = nn.Conv2d(dim, dim, kernel_size, stride, kernel_size//2)
+        self.final_conv = nn.Conv2d(dim, out_chans, kernel_size, stride, kernel_size//2)
         
     def forward(self, x):
         for mobivari in self.mobivari:
@@ -527,8 +527,8 @@ class Reconstruction(nn.Module):
         flops += H*W * self.kernel_size*self.kernel_size * self.out_chans * self.out_chans # self.final_conv
         return flops
   
-    
-class RAMiT(nn.Module):
+
+class RAMiTModule(nn.Module):
     def __init__(self, 
                  in_chans=4, 
                  dim=4, 
@@ -545,16 +545,14 @@ class RAMiT(nn.Module):
                  act_layer=nn.GELU, 
                  norm_layer=ReshapeLayerNorm, 
                  tail_mv=2, 
-                 weight_init='', 
                  target_mode='light_dr', 
                  img_norm=True,
                  attn_drop=0.0, 
                  proj_drop=0.0, 
                  drop_path=0.0, 
                  helper=True, 
-                 mv_act=nn.LeakyReLU, 
-                 **kwargs):
-        super(RAMiT, self).__init__()
+                 mv_act=nn.LeakyReLU):
+        super(RAMiTModule, self).__init__()
         
         self.unit = 2 ** (len(depths)-2) * window_size
         self.in_chans = in_chans
@@ -574,7 +572,7 @@ class RAMiT(nn.Module):
         self.mean, self.std = mean_std(self.scale, target_mode)
         self.target_mode = target_mode
         self.img_norm = img_norm
-        
+        self.shallow = ShallowModule(in_chans, dim, 3, 1)
         self.stage1 = EncoderStage(depths[0], dim, num_heads[0], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
                                    hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
         self.stage2 = EncoderStage(depths[1], dim, num_heads[1], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
@@ -585,10 +583,66 @@ class RAMiT(nn.Module):
         self.stage4 = EncoderStage(depths[3], dim, num_heads[3], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
                                    hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
         self.attn_mix = HRAMi(dim, 3, 1, mv_ver, mv_act)
-        self.to_target = Reconstruction(target_mode, dim, 3, 1, tail_mv, mv_ver, mv_act, exp_factor, expand_groups)
+        self.to_target = Reconstruction(in_chans, dim, 3, 1, tail_mv, mv_ver, mv_act, exp_factor, expand_groups)
         
-        self.new_conv_in = nn.Conv2d(12, 320, kernel_size=3, padding=1)
         self.apply(self._init_weights)
+
+    def forward(self, rgb_latent):
+        """
+        Forward pass of the fusion module.
+        Inputs:
+          rgb_latent: tensor of shape [B, 4, H, W]
+          split as (rgb_latent, depth_latent): tensors of shape [B, 4, H, W].
+        Output:
+          out: tensor of shape [B, 320, H, W] combining all.
+        """
+        shallow = self.shallow(rgb_latent)
+        o1, attn1 = self.stage1(shallow) # [B, C, H//8, W//8]
+        o2, attn2 = self.stage2(o1)         # [B, C, H//8, W//8]
+        o3, attn3 = self.stage3(o2)         # [B, C, H//8, W//8]
+        
+        ob = self.bottleneck([shallow, o1, o2, o3])   # [B, C, H//8, W//8]
+        
+        o4, attn4 = self.stage4(ob)             # [B, C, H//8, W//8]
+        mix = self.attn_mix([attn1, attn2, attn3, attn4]) # [B, C, H//8, W//8]
+        o4 = o4 * mix   # [B, C, H, W]
+        
+        ra_latent = self.to_target(o4 + shallow)    # global skip connection
+        ra_latent = ra_latent + rgb_latent
+        
+        return ra_latent
+    
+    def _init_weights(self, m):
+        # Swin V2 manner
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+        # Additionally, if this is the to_target layer, initialize its weights and bias to zero
+        if hasattr(self, 'to_target') and m is self.to_target:
+            if hasattr(m, 'weight') and m.weight is not None:
+                nn.init.constant_(m.weight, 0)
+            if hasattr(m, 'bias') and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+    
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        nwd = set()
+        for n, _ in self.named_parameters():
+            if 'relative_position_bias_table' in n:
+                nwd.add(n)
+        return nwd
+   
+    
+class RAMiT(nn.Module):
+    def __init__(self, **kwargs):
+        super(RAMiT, self).__init__()
+        self.ramit_module = RAMiTModule(**kwargs)
+        self.new_conv_in = nn.Conv2d(12, 320, kernel_size=3, padding=1)
 
     def forward(self, sample):
         """
@@ -600,53 +654,12 @@ class RAMiT(nn.Module):
           out: tensor of shape [B, 320, H, W] combining all.
         """
         rgb_latent, depth_latent = torch.split(sample, [4, 4], dim=1)
-       
-        o1, attn1 = self.stage1(rgb_latent) # [B, C, H//8, W//8]
-        o2, attn2 = self.stage2(o1)         # [B, C, H//8, W//8]
-        o3, attn3 = self.stage3(o2)         # [B, C, H//8, W//8]
-        
-        ob = self.bottleneck([rgb_latent, o1, o2, o3])   # [B, C, H//8, W//8]
-        
-        o4, attn4 = self.stage4(ob)             # [B, C, H//8, W//8]
-        mix = self.attn_mix([attn1, attn2, attn3, attn4]) # [B, C, H//8, W//8]
-        o4 = o4 * mix   # [B, C, H, W]
-        
-        ra_latent = self.to_target(o4)    # global skip connection
-        ra_latent = ra_latent + rgb_latent
+        ra_latent = self.ramit_module(rgb_latent)
         
         out = torch.cat((rgb_latent, ra_latent, depth_latent), dim=1) # [B, 12, H, W]
         out = self.new_conv_in(out)     # [B, 320, H, W]
         
         return out
-    
-    def flops(self, resolutions):
-        H_ori,W_ori = resolutions
-        padh = self.unit-(H_ori%self.unit) if H_ori%self.unit!=0 else 0
-        padw = self.unit-(W_ori%self.unit) if W_ori%self.unit!=0 else 0
-        H,W = H_ori+padh,W_ori+padw
-        flops = 0
-        flops += self.shallow.flops((H,W))
-        flops += self.stage1.flops((H,W))
-        flops += self.down1.flops((H,W))
-        flops += self.stage2.flops((H//2,W//2))
-        flops += self.down2.flops((H//2,W//2))
-        flops += self.stage3.flops((H//4,W//4))
-        flops += self.bottleneck.flops((H,W))
-        flops += self.stage4.flops((H,W))
-        flops += self.attn_mix.flops((H,W))
-        flops += self.dim * H*W # o4 = o4*mix
-        flops += self.to_target.flops((H,W))
-        return flops
-    
-    def _init_weights(self, m):
-        # Swin V2 manner
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
     
     @torch.jit.ignore
     def no_weight_decay(self):

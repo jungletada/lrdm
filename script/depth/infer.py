@@ -254,7 +254,12 @@ if "__main__" == __name__:
         # variant=variant, 
         # torch_dtype=dtype,
     )
-
+    
+    # Use Original MarigoldDepthPipeline
+    pipeline: MarigoldDepthPipeline = MarigoldDepthPipeline.from_pretrained(
+        args.base_checkpoint, variant=variant, torch_dtype=dtype
+    )
+    
     try:
         pipeline.enable_xformers_memory_efficient_attention()
     except ImportError:
@@ -270,10 +275,6 @@ if "__main__" == __name__:
         for batch in tqdm(
             dataloader, desc=f"Depth Inference on {dataset.disp_name}", leave=True
         ):
-            # rgb_int = batch["rgb_int"].squeeze().numpy().astype(np.uint8)  # [3, H, W]
-            # rgb_int = np.moveaxis(rgb_int, 0, -1)  # [H, W, 3]
-            # input_image = Image.fromarray(rgb_int)
-            
             input_image = batch["rgb_int"]
             # Random number generator
             if seed is None:
@@ -283,7 +284,7 @@ if "__main__" == __name__:
                 generator.manual_seed(seed)
             
             # Perform inference
-            pipe_out: MarigoldDepthOutput = pipeline(
+            pipe_output: MarigoldDepthOutput = pipeline(
                 input_image,
                 denoising_steps=denoise_steps,
                 ensemble_size=ensemble_size,
@@ -295,20 +296,24 @@ if "__main__" == __name__:
                 resample_method=resample_method,
                 generator=generator,
             )
-            depth_pred: np.ndarray = pipe_out.depth_np
+            
+            # depth_pred: np.ndarray = pipe_output.depth_np
+            latent_output: torch.Tensor = pipe_output.latent_ts
+            latent_output = latent_output.cpu().numpy()
+            
             # Save predictions
             rgb_filename = batch["rgb_relative_path"][0]
             rgb_basename = os.path.basename(rgb_filename)
             scene_dir = os.path.join(output_dir, os.path.dirname(rgb_filename))
+            
             if not os.path.exists(scene_dir):
                 os.makedirs(scene_dir)
-            # pred_basename = get_pred_name(
-            #     rgb_basename, dataset.name_mode, suffix=".npy"
-            # )
+
             pred_basename = rgb_basename.replace(".png", ".npy")
             
             save_to = os.path.join(scene_dir, pred_basename)
             if os.path.exists(save_to):
                 logging.warning(f"Existing file: '{save_to}' will be overwritten")
             
-            np.save(save_to, depth_pred)
+            np.save(save_to, latent_output.squeeze())
+            # np.save(save_to, depth_pred)

@@ -98,6 +98,9 @@ Install the dependencies:
 ```bash
 python -m venv venv/marigold
 source venv/marigold/bin/activate
+```
+
+```bash
 pip install -r requirements.txt
 ```
 
@@ -192,6 +195,7 @@ Prepare for [Hypersim](https://github.com/apple/ml-hypersim), [Interiorverse](ht
 ### Run training script
 ```bash
 python script/depth/train.py --config config/train_weather_depth.yaml
+python script/depth/train_restore.py --config config/train_rasmit_latent.yaml
 ```
 Resume from a checkpoint, e.g.:
 

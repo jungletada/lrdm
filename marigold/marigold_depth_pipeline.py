@@ -55,7 +55,6 @@ from .util.image_util import (
     get_tv_resample_method,
     resize_max_res,
 )
-from marigold.model.controldepth import ControlDepth
 
 
 class MarigoldDepthOutput(BaseOutput):
@@ -280,6 +279,7 @@ class MarigoldDepthPipeline(DiffusionPipeline):
             )
         else:
             iterable = single_rgb_loader
+            
         for batch in iterable:
             (batched_img,) = batch
             target_pred_raw = self.single_infer(
@@ -289,10 +289,11 @@ class MarigoldDepthPipeline(DiffusionPipeline):
                 generator=generator,
             )
             target_pred_ls.append(target_pred_raw.detach())
+            
         target_preds = torch.concat(target_pred_ls, dim=0)
         torch.cuda.empty_cache()  # clear vram cache for ensembling
 
-        # ----------------- Test-time ensembling -----------------
+        # ------------------ Test-time ensembling ------------------
         if ensemble_size > 1:
             final_pred, pred_uncert = ensemble_depth(
                 target_preds,
@@ -338,7 +339,7 @@ class MarigoldDepthPipeline(DiffusionPipeline):
             depth_colored=depth_colored_img,
             uncertainty=pred_uncert,
         )
-
+        
     def _check_inference_step(self, n_step: int) -> None:
         """
         Check if denoising step is reasonable
@@ -395,6 +396,147 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         text_input_ids = text_inputs.input_ids.to(self.text_encoder.device)
         self.empty_text_embed = self.text_encoder(text_input_ids)[0].to(self.dtype)
 
+    @torch.no_grad()
+    def infer_rgb(
+        self,
+        input_image: Union[Image.Image, torch.Tensor],
+        denoising_steps: Optional[int] = None,
+        ensemble_size: int = 1,
+        processing_res: Optional[int] = None,
+        match_input_res: bool = True,
+        resample_method: str = "bilinear",
+        batch_size: int = 0,
+        generator: Union[torch.Generator, None] = None,
+        color_map: str = "Spectral",
+        show_progress_bar: bool = True,
+        ensemble_kwargs: Dict = None,
+    ) -> MarigoldDepthOutput:
+        """
+        Function invoked when calling the pipeline.
+
+        Args:
+            input_image (`Image`):
+                Input RGB (or gray-scale) image.
+            denoising_steps (`int`, *optional*, defaults to `None`):
+                Number of denoising diffusion steps during inference. The default value `None` results in automatic
+                selection.
+            ensemble_size (`int`, *optional*, defaults to `1`):
+                Number of predictions to be ensembled.
+            processing_res (`int`, *optional*, defaults to `None`):
+                Effective processing resolution. When set to `0`, processes at the original image resolution. This
+                produces crisper predictions, but may also lead to the overall loss of global context. The default
+                value `None` resolves to the optimal value from the model config.
+            match_input_res (`bool`, *optional*, defaults to `True`):
+                Resize the prediction to match the input resolution.
+                Only valid if `processing_res` > 0.
+            resample_method: (`str`, *optional*, defaults to `bilinear`):
+                Resampling method used to resize images and predictions. This can be one of `bilinear`, `bicubic` or
+                `nearest`, defaults to: `bilinear`.
+            batch_size (`int`, *optional*, defaults to `0`):
+                Inference batch size, no bigger than `num_ensemble`.
+                If set to 0, the script will automatically decide the proper batch size.
+            generator (`torch.Generator`, *optional*, defaults to `None`)
+                Random generator for initial noise generation.
+            show_progress_bar (`bool`, *optional*, defaults to `True`):
+                Display a progress bar of diffusion denoising.
+            color_map (`str`, *optional*, defaults to `"Spectral"`, pass `None` to skip colorized depth map generation):
+                Colormap used to colorize the depth map.
+            scale_invariant (`str`, *optional*, defaults to `True`):
+                Flag of scale-invariant prediction, if True, scale will be adjusted from the raw prediction.
+            shift_invariant (`str`, *optional*, defaults to `True`):
+                Flag of shift-invariant prediction, if True, shift will be adjusted from the raw prediction, if False,
+                near plane will be fixed at 0m.
+            ensemble_kwargs (`dict`, *optional*, defaults to `None`):
+                Arguments for detailed ensembling settings.
+        Returns:
+            `MarigoldDepthOutput`: Output class for Marigold monocular depth prediction pipeline, including:
+            - **depth_np** (`np.ndarray`) Predicted depth map with depth values in the range of [0, 1]
+            - **depth_colored** (`PIL.Image.Image`) Colorized depth map, with the shape of [H, W, 3] and values in [0, 255], None if `color_map` is `None`
+            - **uncertainty** (`None` or `np.ndarray`) Uncalibrated uncertainty(MAD, median absolute deviation)
+                    coming from ensembling. None if `ensemble_size = 1`
+        """
+        # Model-specific optimal default values leading to fast and reasonable results.
+        if denoising_steps is None:
+            denoising_steps = self.default_denoising_steps
+        if processing_res is None:
+            processing_res = self.default_processing_resolution
+
+        assert processing_res >= 0
+        assert ensemble_size >= 1
+
+        # Check if denoising step is reasonable
+        self._check_inference_step(denoising_steps)
+
+        resample_method: InterpolationMode = get_tv_resample_method(resample_method)
+
+        # ----------------- Image Preprocess -----------------
+        # Convert to torch tensor
+        if isinstance(input_image, Image.Image):
+            input_image = input_image.convert("RGB")
+            # convert to torch tensor [H, W, rgb] -> [rgb, H, W]
+            rgb = pil_to_tensor(input_image)
+            rgb = rgb.unsqueeze(0)  # [1, rgb, H, W]
+        elif isinstance(input_image, torch.Tensor):
+            rgb = input_image
+        else:
+            raise TypeError(f"Unknown input type: {type(input_image) = }")
+        input_size = rgb.shape
+        assert (
+            4 == rgb.dim() and 3 == input_size[-3]
+        ), f"Wrong input shape {input_size}, expected [1, rgb, H, W]"
+
+        # Resize image
+        if processing_res > 0:
+            rgb = resize_max_res(
+                rgb,
+                max_edge_resolution=processing_res,
+                resample_method=resample_method,
+            )
+
+        # Normalize rgb values
+        rgb_norm: torch.Tensor = rgb / 255.0 * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
+        rgb_norm = rgb_norm.to(self.dtype)
+        
+        assert rgb_norm.min() >= -1.0 and rgb_norm.max() <= 1.0
+
+        # ----------------- Predicting depth -----------------
+        # Batch repeated input image
+        duplicated_rgb = rgb_norm.expand(ensemble_size, -1, -1, -1)
+        single_rgb_dataset = TensorDataset(duplicated_rgb)
+        if batch_size > 0:
+            _bs = batch_size
+        else:
+            _bs = find_batch_size(
+                ensemble_size=ensemble_size,
+                input_res=max(rgb_norm.shape[1:]),
+                dtype=self.dtype,
+            )
+
+        single_rgb_loader = DataLoader(
+            single_rgb_dataset, batch_size=_bs, shuffle=False
+        )
+
+        if show_progress_bar:
+            iterable = tqdm(
+                single_rgb_loader, desc=" " * 2 + "Inference batches", leave=False
+            )
+        else:
+            iterable = single_rgb_loader
+        
+        device = self.device
+        for batch in iterable:
+            (batched_img,) = batch
+            batched_img = batched_img.to(device)
+            rgb_latent = self.encode_rgb(rgb_in=batched_img)
+           
+        torch.cuda.empty_cache()  # clear vram cache for ensembling
+        return MarigoldDepthOutput(
+            depth_np=None,
+            latent_ts=rgb_latent,
+            depth_colored=None,
+            uncertainty=None,
+        )
+        
     @torch.no_grad()
     def single_infer(
         self,
@@ -477,7 +619,7 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         depth = (depth + 1.0) / 2.0
 
         return depth
-
+    
     def encode_rgb(self, rgb_in: torch.Tensor) -> torch.Tensor:
         """
         Encode RGB image into latent.

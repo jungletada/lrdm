@@ -217,6 +217,8 @@ class WeatherRAMDepthTrainer:
 
     def replace_convin_with_ramit(self):
         self.model.unet.conv_in = RAMiT()
+        # checkpoint = torch.load(self.cfg.ramit_path, map_location='cpu')
+        # self.model.unet.conv_in.ramit_module.load_state_dict(checkpoint)
         logging.info("Unet conv_in layer is replaced")
         return
         
