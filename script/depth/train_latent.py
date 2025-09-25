@@ -220,7 +220,11 @@ if "__main__" == __name__:
     )
     
     # -------------------- Model --------------------
-    model = RAMiTModule()
+    model = RAMiTModule(
+        dim=cfg.model.dim, 
+        depths=cfg.model.depths, 
+        num_heads=cfg.model.num_heads, 
+    )
     # -------------------- Trainer --------------------
     # Exit time
     if args.exit_after > 0:
@@ -239,13 +243,11 @@ if "__main__" == __name__:
         out_dir_ckpt=out_dir_ckpt,
         accumulation_steps=accumulation_steps,
     )
-
     # -------------------- Checkpoint --------------------
     if resume_run is not None:
         trainer.load_checkpoint(
             resume_run, load_trainer_state=True, resume_lr_scheduler=True
         )
-
     # -------------------- Training & Evaluation Loop --------------------
     try:
         trainer.train(t_end=t_end)

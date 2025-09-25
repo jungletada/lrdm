@@ -85,9 +85,9 @@ class RAMiTLatentTrainer:
 
         # Building Loss
         self.smooth_l1_loss = nn.SmoothL1Loss()
-        self.charbonnier_loss = CharbonnierLoss()
-        self.ssim_loss = SSIMLoss()
-        self.train_metrics = MetricTracker(*["smooth_l1_loss", "charbonnier_loss", "ssim_loss", "loss"])
+        # self.charbonnier_loss = CharbonnierLoss()
+        # self.ssim_loss = SSIMLoss()
+        self.train_metrics = MetricTracker(*["loss"])
     
         # Settings
         self.max_epoch = self.cfg.max_epoch
@@ -135,7 +135,7 @@ class RAMiTLatentTrainer:
 
                 # >>> With gradient accumulation >>>
 
-                # Get data
+                # Load data with "input_latent" and "target_latent"
                 rgb_latent = batch["input_latent"].to(device)
                 target = batch["target_latent"].to(device)
                 
@@ -145,14 +145,14 @@ class RAMiTLatentTrainer:
                     logging.warning("model_pred contains NaN.")
                     exit(0)
 
-                smooth_l1_loss = self.smooth_l1_loss(model_pred, target)
-                charbonnier_loss = self.charbonnier_loss(model_pred, target)
-                ssim_loss = self.ssim_loss(model_pred, target)
-                loss = 2 * smooth_l1_loss + charbonnier_loss + ssim_loss
+                loss = self.smooth_l1_loss(model_pred, target)
+                # charbonnier_loss = self.charbonnier_loss(model_pred, target)
+                # ssim_loss = self.ssim_loss(model_pred, target)
+                # loss = 2 * smooth_l1_loss + charbonnier_loss + ssim_loss
                 
-                self.train_metrics.update("smooth_l1_loss", smooth_l1_loss.item())
-                self.train_metrics.update("charbonnier_loss", charbonnier_loss.item())
-                self.train_metrics.update("ssim_loss", ssim_loss.item())
+                # self.train_metrics.update("smooth_l1_loss", smooth_l1_loss.item())
+                # self.train_metrics.update("charbonnier_loss", charbonnier_loss.item())
+                # self.train_metrics.update("ssim_loss", ssim_loss.item())
                 self.train_metrics.update("loss", loss.item())
                 loss = loss / self.gradient_accumulation_steps
                 loss.backward()
@@ -205,6 +205,7 @@ class RAMiTLatentTrainer:
                         )
                         logging.info("Training ended.")
                         return
+                    
                     # Time's up
                     elif t_end is not None and datetime.now() >= t_end:
                         self.save_checkpoint(ckpt_name="latest", save_train_state=True)

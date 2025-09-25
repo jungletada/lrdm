@@ -9,8 +9,13 @@ augmentation:
 dataloader:
   num_workers: 8
   effective_batch_size: 64
-  max_train_batch_size: 64
-  seed: 2025  # to ensure continuity when resuming from checkpoint
+  max_train_batch_size: 32
+  seed: 3407  # to ensure continuity when resuming from checkpoint
+
+model:
+  dim: 64
+  depths: [6, 4, 4, 6]
+  num_heads: [4, 4, 4, 4]
 
 trainer:
   name: RAMiTLatentTrainer
@@ -26,15 +31,10 @@ max_iter: 80000   # usually converges at around 80k
 optimizer:
   name: AdamW
 
-loss:
-  name: mse_loss
-  kwargs:
-    reduction: mean
-
-lr: 1e-03
+lr: 6e-04
 lr_scheduler:
   name: IterExponential
   kwargs:
     total_iter: 80000
-    final_ratio: 0.005
-    warmup_steps: 100
+    final_ratio: 0.01
+    warmup_steps: 200

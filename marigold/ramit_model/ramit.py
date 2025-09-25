@@ -510,10 +510,11 @@ class Reconstruction(nn.Module):
         flops += H*W * self.kernel_size*self.kernel_size * self.out_chans * self.out_chans # self.final_conv
         return flops
   
+  
 class SEGate2d(nn.Module):
     """
         x: [B, C, H, W]  ->  g: [B, d, H, W]  (sigmoid门控)
-    做法：Conv1x1将C->d，然后对z做SE(channel attention)，得到通道权重w，并与z逐点相乘再sigmoid作为门控g。
+        做法：Conv1x1将C->d，然后对z做SE(channel attention)，得到通道权重w，并与z逐点相乘再sigmoid作为门控g。
     """
     def __init__(self, in_channels: int, out_channels: int, reduction: int = 16):
         super().__init__()
