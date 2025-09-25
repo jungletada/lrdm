@@ -9,19 +9,19 @@ augmentation:
 dataloader:
   num_workers: 8
   effective_batch_size: 64
-  max_train_batch_size: 32
+  max_train_batch_size: 64
   seed: 2025  # to ensure continuity when resuming from checkpoint
 
 trainer:
   name: RAMiTLatentTrainer
   training_noise_scheduler:
     pretrained_path: checkpoint/ramit_restore
-  init_seed: 2025  # use null to train w/o seeding
-  save_period: 500
-  backup_period: 500
+  init_seed: 3407  # use null to train w/o seeding
+  save_period: 2000
+  backup_period: 2000
 
 max_epoch: 10000  # a large enough number
-max_iter: 20000   # usually converges at around 20k
+max_iter: 80000   # usually converges at around 80k
 
 optimizer:
   name: AdamW
@@ -31,10 +31,10 @@ loss:
   kwargs:
     reduction: mean
 
-lr: 3.0e-04
+lr: 1e-03
 lr_scheduler:
   name: IterExponential
   kwargs:
-    total_iter: 20000
-    final_ratio: 0.01
+    total_iter: 80000
+    final_ratio: 0.005
     warmup_steps: 100

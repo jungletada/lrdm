@@ -55,6 +55,7 @@ from .util.image_util import (
     get_tv_resample_method,
     resize_max_res,
 )
+from marigold.ramit_model.ramit import RAMiTModule
 
 
 class MarigoldDepthOutput(BaseOutput):
@@ -150,7 +151,7 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         self.default_processing_resolution = default_processing_resolution
 
         self.empty_text_embed = None
-
+        
     @torch.no_grad()
     def __call__(
         self,
@@ -631,12 +632,11 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         Returns:
             `torch.Tensor`: Image latent.
         """
-        # encode
         h = self.vae.encoder(rgb_in)
         moments = self.vae.quant_conv(h)
         mean, logvar = torch.chunk(moments, 2, dim=1)
-        # scale latent
-        rgb_latent = mean * self.latent_scale_factor
+        rgb_latent = mean * self.latent_scale_factor    # scale latent
+
         return rgb_latent
 
     def decode_depth(self, depth_latent: torch.Tensor) -> torch.Tensor:

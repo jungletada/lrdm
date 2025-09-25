@@ -15,7 +15,6 @@ from timm.layers import trunc_normal_, DropPath
 # from util.etc_utils import denormalize # ramit_model.
 from .common.mean_std import mean_std
 
-
 def make_model(args, opts, pe):
     model = RAMiT(target_mode=args.target_mode,
                   img_norm=args.img_norm,
@@ -44,7 +43,6 @@ def make_model(args, opts, pe):
     print(format(num_params, ','))
     return model
 
-
 class ShallowModule(nn.Module):
     def __init__(self, in_chans, out_chans, kernel_size=3, stride=1):
         super(ShallowModule, self).__init__()
@@ -60,7 +58,6 @@ class ShallowModule(nn.Module):
     
     def flops(self, resolutions):
         return resolutions[0]*resolutions[1] * self.kernel_size*self.kernel_size * self.in_chans * self.out_chans
-
 
 class QKVProjection(nn.Module):
     def __init__(self, dim, num_head, qkv_bias=True):
@@ -79,7 +76,6 @@ class QKVProjection(nn.Module):
     def flops(self, resolutions):
         return resolutions[0]*resolutions[1] * 1*1 * self.dim * 3*self.dim
 
-
 def get_relative_position_index(win_h, win_w):
     # get pair-wise relative position index for each token inside the window
     coords = torch.stack(torch.meshgrid([torch.arange(win_h), torch.arange(win_w)], indexing='ij'))  # 2, Wh, Ww
@@ -90,7 +86,6 @@ def get_relative_position_index(win_h, win_w):
     relative_coords[:, :, 1] += win_w - 1
     relative_coords[:, :, 0] *= 2 * win_w - 1
     return relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-
 
 class SpatialSelfAttention(nn.Module):
     def __init__(self, dim, num_head, total_head, window_size=8, shift=0, attn_drop=0.0, proj_drop=0.0, helper=True):
@@ -171,8 +166,7 @@ class SpatialSelfAttention(nn.Module):
 def window_unpartition(x, resolutions, window_size):
     return rearrange(x, '(b h w) l (wh ww) c -> b (l c) (h wh) (w ww)', 
                      h=resolutions[0]//window_size, w=resolutions[1]//window_size, wh=window_size)
-    
-    
+     
 class ChannelSelfAttention(nn.Module):
     def __init__(self, dim, num_head, total_head, attn_drop=0.0, proj_drop=0.0, helper=True):
         super(ChannelSelfAttention, self).__init__()
@@ -219,8 +213,7 @@ class ChannelSelfAttention(nn.Module):
         flops += self.num_head * self.dim * self.dim * H*W # attn@V
         flops += H*W * 1*1 * self.num_head*self.dim * self.num_head*self.dim # self.proj
         return flops
-    
-    
+     
 class ReshapeLayerNorm(nn.Module):
     def __init__(self, dim, norm_layer=nn.LayerNorm):
         super(ReshapeLayerNorm, self).__init__()
@@ -240,8 +233,7 @@ class ReshapeLayerNorm(nn.Module):
         flops = 0
         flops += H*W * self.dim
         return flops
-   
-    
+      
 class MobiVari1(nn.Module): # MobileNet v1 Variants
     def __init__(self, dim, kernel_size, stride, act=nn.LeakyReLU, out_dim=None):
         super(MobiVari1, self).__init__()
@@ -261,7 +253,6 @@ class MobiVari1(nn.Module): # MobileNet v1 Variants
         H,W = resolutions
         flops = H*W * self.kernel_size*self.kernel_size * self.dim  +  H*W * 1*1 * self.dim * self.out_dim # self.dw_conv + self.pw_conv
         return flops
-
 
 class MobiVari2(MobiVari1): # MobileNet v2 Variants
     def __init__(self, dim, kernel_size, stride, act=nn.LeakyReLU, out_dim=None, exp_factor=1.2, expand_groups=4):
@@ -286,7 +277,6 @@ class MobiVari2(MobiVari1): # MobileNet v2 Variants
         flops += H*W * self.kernel_size*self.kernel_size * self.expand_dim # self.dw_conv
         flops += H*W * 1*1 * self.expand_dim * self.out_dim # self.pw_conv
         return flops
- 
     
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_ratio, act_layer=nn.GELU, bias=True, drop=0.0):
@@ -308,8 +298,7 @@ class FeedForward(nn.Module):
         H,W = resolutions
         flops = 2 * H*W * 1*1 * self.dim * self.dim*self.hidden_ratio # self.hidden + self.out
         return flops
-    
-    
+        
 class NoLayer(nn.Identity):
     def __init__(self):
         super(NoLayer, self).__init__()
@@ -317,8 +306,7 @@ class NoLayer(nn.Identity):
         return 0
     def forward(self, x, **kwargs):
         return x.flatten(1,2)
-    
-    
+      
 class DRAMiTransformer(nn.Module): # Reciprocal Attention Transformer Block
     def __init__(self, dim, num_head, chsa_head_ratio, window_size=8, shift=0, head_dim=None, qkv_bias=True, mv_ver=1,
                  hidden_ratio=2.0, act_layer=nn.GELU, norm_layer=ReshapeLayerNorm, attn_drop=0.0, proj_drop=0.0, drop_path=0.0, helper=True,
@@ -374,8 +362,7 @@ class DRAMiTransformer(nn.Module): # Reciprocal Attention Transformer Block
         flops += self.norm2.flops(resolutions)
         params = sum([p.numel() for n,p in self.named_parameters()])
         return flops
-   
-    
+      
 class EncoderStage(nn.Module):
     def __init__(self, depth, dim, num_head, chsa_head_ratio, window_size=8, head_dim=None, 
                  qkv_bias=True, mv_ver=1, hidden_ratio=2.0, act_layer=nn.GELU, norm_layer=ReshapeLayerNorm,
@@ -408,7 +395,6 @@ class EncoderStage(nn.Module):
         for blk in self.blocks:
             flops += blk.flops(resolutions)
         return flops
-
 
 class Downsizing(nn.Module):
     """ Patch Merging Layer.
@@ -445,7 +431,6 @@ class Downsizing(nn.Module):
         flops = self.norm.flops((H//2,W//2)) + self.reduction.flops((H//2,W//2))
         return flops  
 
-
 class Bottleneck(nn.Module):
     def __init__(self, dim, num_stages, act_layer=nn.GELU, norm_layer=ReshapeLayerNorm, 
                  mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
@@ -478,7 +463,6 @@ class Bottleneck(nn.Module):
         flops += self.mobivari.flops((H,W))
         flops += self.norm.flops((H,W))
         return flops
-  
     
 class HRAMi(nn.Module):
     def __init__(self, dim, kernel_size=3, stride=1, mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
@@ -497,8 +481,7 @@ class HRAMi(nn.Module):
     
     def flops(self, resolutions):
         return self.mobivari.flops(resolutions)
-
-    
+  
 class Reconstruction(nn.Module):
     def __init__(self, out_chans, dim, kernel_size=3, stride=1, num_mv=2, mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
         super(Reconstruction, self).__init__()
@@ -527,11 +510,77 @@ class Reconstruction(nn.Module):
         flops += H*W * self.kernel_size*self.kernel_size * self.out_chans * self.out_chans # self.final_conv
         return flops
   
+class SEGate2d(nn.Module):
+    """
+        x: [B, C, H, W]  ->  g: [B, d, H, W]  (sigmoid门控)
+    做法：Conv1x1将C->d，然后对z做SE(channel attention)，得到通道权重w，并与z逐点相乘再sigmoid作为门控g。
+    """
+    def __init__(self, in_channels: int, out_channels: int, reduction: int = 16):
+        super().__init__()
+        self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+
+        # Squeeze: GAP -> [B, d, 1, 1]
+        # Excitation: 两层FC（用1x1卷积实现），d -> d//r -> d
+        hidden = max(out_channels // reduction, 1)
+        self.fc1 = nn.Conv2d(out_channels, hidden, kernel_size=1)
+        self.fc2 = nn.Conv2d(hidden, out_channels, kernel_size=1)
+
+        self.act = nn.ReLU(inplace=True)
+        self.sig = nn.Sigmoid()
+
+        # 可选：初始化更稳定（非必需）
+        nn.init.kaiming_normal_(self.proj.weight, nonlinearity="relu")
+        nn.init.kaiming_normal_(self.fc1.weight, nonlinearity="relu")
+        nn.init.zeros_(self.fc2.weight)
+
+    def forward(self, x):
+        # 1) 通道映射 C->d
+        z = self.proj(x)                          # [B, d, H, W]
+
+        # 2) Squeeze（全局平均池化）得到通道描述
+        s = F.adaptive_avg_pool2d(z, 1)           # [B, d, 1, 1]
+
+        # 3) Excitation（两层MLP）得到通道权重
+        w = self.fc2(self.act(self.fc1(s)))       # [B, d, 1, 1]
+        w = self.sig(w)                           # [B, d, 1, 1] in (0,1)
+
+        # 4) 生成门控图（带空间信息）：逐点调制并Sigmoid
+        g = self.sig(z * w)                       # [B, d, H, W] in (0,1)
+        return g
+
+class CBAMGate2d(nn.Module):
+    """
+    x: [B, C, H, W] -> g: [B, d, H, W]
+    先做SE样式的通道门控，再做CBAM样式的空间门控（avg/max通道池化 -> 7x7 conv）。
+    """
+    def __init__(self, in_channels: int, out_channels: int, reduction: int = 16, spatial_kernel: int = 7):
+        super().__init__()
+        self.channel_gate = SEGate2d(in_channels, out_channels, reduction)
+
+        # 空间门控：按照CBAM，用通道平均与通道最大池化，拼接后卷积生成 [B,1,H,W]
+        padding = spatial_kernel // 2
+        self.spatial_conv = nn.Conv2d(2, 1, kernel_size=spatial_kernel, padding=padding, bias=False)
+        nn.init.kaiming_normal_(self.spatial_conv.weight, nonlinearity="relu")
+        self.sig = nn.Sigmoid()
+
+    def forward(self, x):
+        # 先得到通道门控后的中间特征（仍作为门控图的基础）
+        g_c = self.channel_gate(x)                # [B, d, H, W]
+
+        # 依据CBAM思路生成空间注意力
+        avg_pool = torch.mean(g_c, dim=1, keepdim=True)             # [B,1,H,W]
+        max_pool, _ = torch.max(g_c, dim=1, keepdim=True)           # [B,1,H,W]
+        s_map = self.sig(self.spatial_conv(torch.cat([avg_pool, max_pool], dim=1)))  # [B,1,H,W]
+
+        # 将空间门控广播到 d 个通道
+        g = g_c * s_map                                             # [B, d, H, W]
+        
+        return g
 
 class RAMiTModule(nn.Module):
     def __init__(self, 
                  in_chans=4, 
-                 dim=4, 
+                 dim=24, 
                  depths=(6,4,4,6), 
                  num_heads=(4,4,4,4), 
                  head_dim=None, 
@@ -584,8 +633,17 @@ class RAMiTModule(nn.Module):
                                    hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
         self.attn_mix = HRAMi(dim, 3, 1, mv_ver, mv_act)
         self.to_target = Reconstruction(in_chans, dim, 3, 1, tail_mv, mv_ver, mv_act, exp_factor, expand_groups)
-        
+        self.scale_residual = CBAMGate2d(in_channels=dim, out_channels=in_chans)
+
         self.apply(self._init_weights)
+
+    def forward_size_norm(self, x):
+        _, _, h, w = x.size()
+        padh = self.unit-(h % self.unit) if h % self.unit != 0 else 0
+        padw = self.unit-(w % self.unit) if w % self.unit != 0 else 0
+        x = TF.pad(x, (0, 0, padw, padh))
+
+        return x
 
     def forward(self, rgb_latent):
         """
@@ -606,11 +664,13 @@ class RAMiTModule(nn.Module):
         o4, attn4 = self.stage4(ob)             # [B, C, H//8, W//8]
         mix = self.attn_mix([attn1, attn2, attn3, attn4]) # [B, C, H//8, W//8]
         o4 = o4 * mix   # [B, C, H, W]
+        o5 = o4 + shallow
+        rs_latent = self.to_target(o5)    # global skip connection
+        gate = self.scale_residual(o5)    # [B, 4, H//8, W//8]
         
-        ra_latent = self.to_target(o4 + shallow)    # global skip connection
-        ra_latent = ra_latent + rgb_latent
+        rs_latent = gate * rs_latent + rgb_latent
         
-        return ra_latent
+        return rs_latent
     
     def _init_weights(self, m):
         # Swin V2 manner
@@ -636,7 +696,6 @@ class RAMiTModule(nn.Module):
             if 'relative_position_bias_table' in n:
                 nwd.add(n)
         return nwd
-   
     
 class RAMiT(nn.Module):
     def __init__(self, **kwargs):

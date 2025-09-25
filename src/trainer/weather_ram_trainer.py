@@ -216,10 +216,24 @@ class WeatherRAMDepthTrainer:
         return
 
     def replace_convin_with_ramit(self):
+        _weight = self.model.unet.conv_in.weight.clone()  # [320, 8, 3, 3]
+        _bias = self.model.unet.conv_in.bias.clone()  # [320]
+
+        # shape check
+        out_c, in_c, kh, kw = _weight.shape
+        if not (out_c == 320 and in_c == 8 and kh == 3 and kw == 3):
+            raise ValueError(f"Expected conv_in weight shape [320, 8, 3, 3], got {_weight.shape}")
+        half = in_c // 2  # 4
+        w1 = _weight[:, :half].contiguous()   # [320, 4, 3, 3]
+        w2 = _weight[:, half:].contiguous()   # [320, 4, 3, 3]
+        w0 = w1.clone()                       # [320, 4, 3, 3]
+        expanded_weight = torch.cat([w1, w0, w2], dim=1).contiguous()  # [320, 12, 3, 3]
+
         self.model.unet.conv_in = RAMiT()
-        # checkpoint = torch.load(self.cfg.ramit_path, map_location='cpu')
-        # self.model.unet.conv_in.ramit_module.load_state_dict(checkpoint)
-        logging.info("Unet conv_in layer is replaced")
+        ramit_checkpoint = torch.load(self.cfg.ramit_path, map_location='cpu')
+        self.model.unet.conv_in.ramit_module.load_state_dict(ramit_checkpoint)
+        self.model.unet.conv_in.new_conv_in.weight = Parameter(expanded_weight)
+        logging.info("Unet conv_in layer is replaced with our RAMiT")
         return
         
     def train(self, t_end=None):
@@ -254,21 +268,8 @@ class WeatherRAMDepthTrainer:
                     rand_num_generator = None
 
                 # >>> With gradient accumulation >>>
-
-                # Get data
                 rgb = batch["rgb_norm"].to(device)
                 depth_gt_for_latent = batch[self.gt_depth_type].to(device)
-                
-                # if self.gt_mask_type is not None:
-                #     valid_mask_for_latent = batch[self.gt_mask_type].to(device)
-                #     invalid_mask = ~valid_mask_for_latent
-                #     valid_mask_down = ~torch.max_pool2d(
-                #         invalid_mask.float(), 8, 8
-                #     ).bool()
-                #     valid_mask_down = valid_mask_down.repeat((1, 4, 1, 1))
-                #     num_true = (valid_mask_down).sum().item()
-                #     print(f"Number of True elements in batch[{self.gt_mask_type}]: {num_true}")
-                    
                 batch_size = rgb.shape[0]
 
                 with torch.no_grad():
@@ -343,14 +344,6 @@ class WeatherRAMDepthTrainer:
                 else:
                     raise ValueError(f"Unknown prediction type {self.prediction_type}")
 
-                # # Masked latent loss
-                # if self.gt_mask_type is not None:
-                #     latent_loss = self.loss(
-                #         model_pred[valid_mask_down].float(),
-                #         target[valid_mask_down].float(),
-                #     )
-                # else:
-                
                 latent_loss = self.loss(model_pred.float(), target.float())
 
                 loss = latent_loss.mean()
@@ -362,7 +355,7 @@ class WeatherRAMDepthTrainer:
                 accumulated_step += 1
 
                 self.n_batch_in_epoch += 1
-                # Practical batch end
+                #-------------- Practical batch end --------------#
 
                 # Perform optimization step
                 if accumulated_step >= self.gradient_accumulation_steps:
@@ -590,16 +583,12 @@ class WeatherRAMDepthTrainer:
                         model_pred_weather[valid_mask_down].float(),
                         target[valid_mask_down].float(),
                     )
-                    # latent_loss_distill = self.loss(
-                    #     model_pred_weather[valid_mask_down].float(),
-                    #     model_pred_weather[valid_mask_down].float().detach(),
-                    # )
                 else:
                     latent_loss_weather = self.loss(model_pred_weather.float(), target.float())
                     # latent_loss_distill = self.loss(model_pred.float(), model_pred_weather.float().detach())
                 
                 loss_weather = latent_loss_weather.mean() / self.gradient_accumulation_steps
-                # loss_distill = latent_loss_distill.mean() / self.gradient_accumulation_steps
+                
                 loss_weather.backward()
                 
                 loss = loss_rgb + loss_weather # + \

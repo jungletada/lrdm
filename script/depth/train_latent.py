@@ -89,7 +89,7 @@ def get_args():
 
 if "__main__" == __name__:
     t_start = datetime.now()
-    logging.info(f"Started at {t_start}")
+    logging.info(f"Training started at {t_start}")
     args = get_args()
 
     resume_run = args.resume_run
@@ -169,12 +169,11 @@ if "__main__" == __name__:
 
     # Tensorboard (should be initialized after wandb)
     tb_logger.set_dir(out_dir_tb)
-
     log_slurm_job_id(step=0)
 
     # -------------------- Device --------------------
-    cuda_avail = torch.cuda.is_available() and not args.no_cuda
-    device = torch.device("cuda" if cuda_avail else "cpu")
+    use_cuda = torch.cuda.is_available() and not args.no_cuda
+    device = torch.device("cuda" if use_cuda else "cpu")
     logging.info(f"device = {device}")
 
     # -------------------- Snapshot of code and config --------------------

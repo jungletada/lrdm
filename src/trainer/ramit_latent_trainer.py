@@ -48,6 +48,7 @@ from src.util.logging_util import tb_logger
 from src.util.lr_scheduler import IterExponential
 from src.util.metric import MetricTracker
 from src.util.seeding import generate_seed_sequence
+from src.trainer.loss_utils import CharbonnierLoss, SSIMLoss
 
 
 class RAMiTLatentTrainer:
@@ -83,8 +84,10 @@ class RAMiTLatentTrainer:
         self.lr_scheduler = LambdaLR(optimizer=self.optimizer, lr_lambda=lr_func)
 
         # Building Loss
-        self.loss = nn.MSELoss()
-        self.train_metrics = MetricTracker(*["loss"])
+        self.smooth_l1_loss = nn.SmoothL1Loss()
+        self.charbonnier_loss = CharbonnierLoss()
+        self.ssim_loss = SSIMLoss()
+        self.train_metrics = MetricTracker(*["smooth_l1_loss", "charbonnier_loss", "ssim_loss", "loss"])
     
         # Settings
         self.max_epoch = self.cfg.max_epoch
@@ -142,14 +145,19 @@ class RAMiTLatentTrainer:
                     logging.warning("model_pred contains NaN.")
                     exit(0)
 
-                latent_loss = self.loss(model_pred, target)
-                loss = latent_loss.mean()
+                smooth_l1_loss = self.smooth_l1_loss(model_pred, target)
+                charbonnier_loss = self.charbonnier_loss(model_pred, target)
+                ssim_loss = self.ssim_loss(model_pred, target)
+                loss = 2 * smooth_l1_loss + charbonnier_loss + ssim_loss
                 
+                self.train_metrics.update("smooth_l1_loss", smooth_l1_loss.item())
+                self.train_metrics.update("charbonnier_loss", charbonnier_loss.item())
+                self.train_metrics.update("ssim_loss", ssim_loss.item())
                 self.train_metrics.update("loss", loss.item())
                 loss = loss / self.gradient_accumulation_steps
                 loss.backward()
-                accumulated_step += 1
 
+                accumulated_step += 1
                 self.n_batch_in_epoch += 1
                 # Practical batch end
 
