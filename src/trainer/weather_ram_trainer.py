@@ -224,9 +224,10 @@ class WeatherRAMDepthTrainer:
         if not (out_c == 320 and in_c == 8 and kh == 3 and kw == 3):
             raise ValueError(f"Expected conv_in weight shape [320, 8, 3, 3], got {_weight.shape}")
         half = in_c // 2  # 4
-        w1 = _weight[:, :half].contiguous()   # [320, 4, 3, 3]
-        w2 = _weight[:, half:].contiguous()   # [320, 4, 3, 3]
+        w1 = _weight[:, :half].contiguous() * 0.9  # [320, 4, 3, 3]
+        w2 = _weight[:, half:].contiguous() * 0.1  # [320, 4, 3, 3]
         w0 = w1.clone()                       # [320, 4, 3, 3]
+        
         expanded_weight = torch.cat([w1, w0, w2], dim=1).contiguous()  # [320, 12, 3, 3]
 
         self.model.unet.conv_in = RAMiT()

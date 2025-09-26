@@ -62,13 +62,13 @@ loss:
   kwargs:
     reduction: mean
 
-lr: 6.0e-05
+lr: 3.0e-05
 lr_scheduler:
   name: IterExponential
   kwargs:
     total_iter: 20000
     final_ratio: 0.01
-    warmup_steps: 200
+    warmup_steps: 100
 
 # Light setting for the in-training validation and visualization
 validation:

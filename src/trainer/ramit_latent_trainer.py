@@ -1,17 +1,20 @@
-import logging
-import numpy as np
 import os
-import shutil
-import torch
-import torch.nn as nn
-
+import logging
+from PIL import Image
+import numpy as np
 from datetime import datetime
 from omegaconf import OmegaConf
+
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+
+import torch
+import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from typing import List, Union
+from typing import List, Union, Optional
 
 from src.util.data_loader import skip_first_batches
 from src.util.logging_util import tb_logger
@@ -20,12 +23,88 @@ from src.util.metric import MetricTracker
 from src.util.seeding import generate_seed_sequence
 
 
+def psnr(mse, data_range=1.0):
+    mse = max(float(mse), 1e-12)
+    return 10.0 * np.log10((data_range ** 2) / mse)
+
+
+def to_rgb_uint8(arr2d: np.ndarray, vmin: float, vmax: float, cmap_name: str) -> np.ndarray:
+    """把 2D 数组映射到 [0,255] 的 RGB，使用指定 colormap。"""
+    arr = np.clip((arr2d - vmin) / (vmax - vmin + 1e-12), 0.0, 1.0)
+    cmap = cm.get_cmap(cmap_name)
+    rgb = cmap(arr)[..., :3]  # RGBA -> RGB
+    return (rgb * 255.0 + 0.5).astype(np.uint8)
+
+
+def save_xy_diff_mosaic(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    out_path: str = "xy_diff_mosaic.png",
+    cmap_xy: str = "viridis",
+    cmap_diff: str = "magma",
+    same_scale: bool = True,
+    diff_clip_percentile: float = 99.5,
+):
+    """
+    将 x, y, |x-y| 按 3×4 网格无缝拼接为一张图并保存。
+    x, y: [4, H, W]（第一维为通道数=4）
+    same_scale: True 时，x 行共享一个色阶、y 行共享一个色阶；diff 行单独共享一个色阶
+    diff_clip_percentile: 对 diff 行按分位数裁剪上限（增强可视化），None 表示不用裁剪
+    """
+    assert x.shape == y.shape and x.dim() == 3, "Expect x,y with shape [C,H,W]."
+    C, H, W = x.shape
+    assert C == 4, f"Expect 4 channels, got {C}"
+
+    x_np = x.detach().cpu().float().numpy()
+    y_np = y.detach().cpu().float().numpy()
+    d_np = np.abs(x_np - y_np)
+
+    # 计算每行的色阶
+    if same_scale:
+        x_vmin, x_vmax = float(x_np.min()), float(x_np.max())
+        y_vmin, y_vmax = float(y_np.min()), float(y_np.max())
+        if diff_clip_percentile is None:
+            d_vmin, d_vmax = float(d_np.min()), float(d_np.max())
+        else:
+            d_vmin, d_vmax = 0.0, float(np.percentile(d_np, diff_clip_percentile))
+        # 为每个通道构造 RGB tile
+        tiles_x = [to_rgb_uint8(x_np[c], x_vmin, x_vmax, cmap_xy) for c in range(C)]
+        tiles_y = [to_rgb_uint8(y_np[c], y_vmin, y_vmax, cmap_xy) for c in range(C)]
+        tiles_d = [to_rgb_uint8(d_np[c], d_vmin, d_vmax, cmap_diff) for c in range(C)]
+    else:
+        tiles_x, tiles_y, tiles_d = [], [], []
+        for c in range(C):
+            tiles_x.append(to_rgb_uint8(x_np[c], float(x_np[c].min()), float(x_np[c].max()), cmap_xy))
+            tiles_y.append(to_rgb_uint8(y_np[c], float(y_np[c].min()), float(y_np[c].max()), cmap_xy))
+            if diff_clip_percentile is None:
+                dvmin, dvmax = float(d_np[c].min()), float(d_np[c].max())
+            else:
+                dvmin, dvmax = 0.0, float(np.percentile(d_np[c], diff_clip_percentile))
+            tiles_d.append(to_rgb_uint8(d_np[c], dvmin, dvmax, cmap_diff))
+
+    # 拼接到一张大图（无缝）
+    canvas = np.zeros((3 * H, 4 * W, 3), dtype=np.uint8)
+    # 第 1 行：x
+    for c in range(C):
+        canvas[0:H, c*W:(c+1)*W, :] = tiles_x[c]
+    # 第 2 行：y
+    for c in range(C):
+        canvas[H:2*H, c*W:(c+1)*W, :] = tiles_y[c]
+    # 第 3 行：|x-y|
+    for c in range(C):
+        canvas[2*H:3*H, c*W:(c+1)*W, :] = tiles_d[c]
+
+    Image.fromarray(canvas).save(out_path)
+    print(f"Saved mosaic to: {out_path}  | size: {canvas.shape[1]}x{canvas.shape[0]}")
+
+
 class RAMiTLatentTrainer:
     def __init__(
         self,
         cfg: OmegaConf,
         model: nn.Module,
         train_dataloader: DataLoader,
+        visualize_dataset,
         device,
         out_dir_ckpt,
         accumulation_steps: int,
@@ -38,6 +117,7 @@ class RAMiTLatentTrainer:
         )  # used to generate seed sequence, set to `None` to train w/o seeding
         self.out_dir_ckpt = out_dir_ckpt
         self.train_loader: DataLoader = train_dataloader
+        self.visualize_dataset: DataLoader = visualize_dataset
         self.accumulation_steps: int = accumulation_steps
         
         # Optimizer !should be defined after input layer is adapted
@@ -187,6 +267,25 @@ class RAMiTLatentTrainer:
             # Epoch end
             self.n_batch_in_epoch = 0
 
+    def show_latent_difference(self):
+        logging.info("Show the difference between sunny and adverse weather latent.")
+        device = self.device
+        logging.info(f"Length of loader {len(self.visualize_dataset) // 7}")
+
+        len_sunny = len(self.visualize_dataset) // 7
+        vis_count = 0
+
+        for step in range(len_sunny*2, len_sunny * 7):
+            data_ = self.visualize_dataset[step]
+            rgb_latent = data_["input_latent"]
+            target = data_["target_latent"]
+            save_xy_diff_mosaic(rgb_latent, target, out_path=f"output/vis_out/{step:5d}.png")
+            
+            vis_count += 1
+
+            if vis_count >= 10:
+                break
+
     def _train_step_callback(self):
         """Executed after every iteration"""
         # Save backup (with a larger interval, without training states)
@@ -220,20 +319,6 @@ class RAMiTLatentTrainer:
         ckpt_dir = os.path.join(self.out_dir_ckpt, ckpt_name)
         os.makedirs(ckpt_dir, exist_ok=True)
         logging.info(f"Saving checkpoint to: {ckpt_dir}")
-        # Backup previous checkpoint
-        # temp_ckpt_dir = None
-        # if os.path.exists(ckpt_dir) and os.path.isdir(ckpt_dir):
-        #     temp_ckpt_dir = os.path.join(
-        #         os.path.dirname(ckpt_dir), f"_old_{os.path.basename(ckpt_dir)}"
-        #     )
-        #     if os.path.exists(temp_ckpt_dir):
-        #         shutil.rmtree(temp_ckpt_dir, ignore_errors=True)
-        #     os.rename(ckpt_dir, temp_ckpt_dir)
-        #     logging.debug(f"Old checkpoint is backed up at: {temp_ckpt_dir}")
-
-        # Save Model
-        # model_path = os.path.join(ckpt_dir)
-        
         torch.save(self.model.state_dict(), os.path.join(ckpt_dir, "ramit.pth"))
         logging.info(f"Model is saved to: {ckpt_dir}")
 

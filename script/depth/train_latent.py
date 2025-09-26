@@ -219,6 +219,8 @@ if "__main__" == __name__:
         generator=loader_generator,
     )
     
+    # Visualize dataset
+
     # -------------------- Model --------------------
     model = RAMiTModule(
         dim=cfg.model.dim, 
@@ -239,6 +241,7 @@ if "__main__" == __name__:
         cfg=cfg,
         model=model,
         train_dataloader=train_loader,
+        visualize_dataset=train_dataset,
         device=device,
         out_dir_ckpt=out_dir_ckpt,
         accumulation_steps=accumulation_steps,
@@ -250,6 +253,7 @@ if "__main__" == __name__:
         )
     # -------------------- Training & Evaluation Loop --------------------
     try:
-        trainer.train(t_end=t_end)
+        # trainer.train(t_end=t_end)
+        trainer.show_latent_difference()
     except Exception as e:
         logging.exception(e)
