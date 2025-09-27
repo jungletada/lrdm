@@ -186,9 +186,10 @@ class RAMiTLatentTrainer:
 
                 # Load data with "input_latent" and "target_latent"
                 rgb_latent = batch["input_latent"].to(device)
+                rgb_image = batch["rgb_norm"].to(device)
                 target = batch["target_latent"].to(device)
                 
-                model_pred = self.model(rgb_latent)  # [B, 4, h, w]
+                model_pred = self.model(rgb_image, rgb_latent)  # [B, 4, h, w]
                 
                 if torch.isnan(model_pred).any():
                     logging.warning("model_pred contains NaN.")

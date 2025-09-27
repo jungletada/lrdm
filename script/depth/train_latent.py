@@ -27,7 +27,7 @@ from src.util.logging_util import (
     tb_logger,
 )
 
-from marigold.ramit_model.ramit import RAMiTModule
+from marigold.ramit_model.ramit import RAMiTModule, RAMiTCond
 
 
 def get_args():
@@ -222,7 +222,7 @@ if "__main__" == __name__:
     # Visualize dataset
 
     # -------------------- Model --------------------
-    model = RAMiTModule(
+    model = RAMiTCond(
         dim=cfg.model.dim, 
         depths=cfg.model.depths, 
         num_heads=cfg.model.num_heads, 
@@ -253,7 +253,7 @@ if "__main__" == __name__:
         )
     # -------------------- Training & Evaluation Loop --------------------
     try:
-        # trainer.train(t_end=t_end)
-        trainer.show_latent_difference()
+        trainer.train(t_end=t_end)
+        # trainer.show_latent_difference()
     except Exception as e:
         logging.exception(e)

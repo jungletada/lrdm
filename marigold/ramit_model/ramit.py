@@ -1,7 +1,9 @@
 # RAMiT (Reciprocal Attention Mixing Transformer)
-# import os
-# import sys
+import os
+import sys
 import math
+from multiprocessing import process
+from tokenize import group
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,9 +13,10 @@ from einops import rearrange
 from timm.models import register_notrace_function
 from timm.layers import trunc_normal_, DropPath
 
-# sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from ramit_model.common.mean_std import mean_std
 # from util.etc_utils import denormalize # ramit_model.
-from .common.mean_std import mean_std
+# from .common.mean_std import mean_std
 
 def make_model(args, opts, pe):
     model = RAMiT(target_mode=args.target_mode,
@@ -43,6 +46,64 @@ def make_model(args, opts, pe):
     print(format(num_params, ','))
     return model
 
+def downsample2d(x: torch.Tensor, factor: int, mode: str = "area") -> torch.Tensor:
+    """
+    Downsample 2D maps by an integer factor using interpolation.
+    - Supports [B, H, W] or [B, C, H, W].
+    - For factor=1 returns x unchanged.
+    """
+    if factor == 1:
+        return x
+
+    added_channel = False
+    if x.dim() == 3:         # [B, H, W] -> [B, 1, H, W]
+        x = x.unsqueeze(1)
+        added_channel = True
+
+    H, W = x.shape[-2:]
+    new_size = (max(1, H // factor), max(1, W // factor))
+
+    if mode in ("bilinear", "bicubic"):
+        x = F.interpolate(x, size=new_size, mode=mode, align_corners=False)
+    else:
+        # 'area' or 'nearest' do not use align_corners
+        x = F.interpolate(x, size=new_size, mode=mode)
+
+    if added_channel:
+        x = x.squeeze(1)     # back to [B, H, W]
+    return x
+
+def upsample2d(x: torch.Tensor, factor: int, mode: str = 'bilinear') -> torch.Tensor:
+    return F.interpolate(
+                    x, 
+                    scale_factor=factor, 
+                    mode=mode, 
+                    align_corners=False)
+
+def conv_module(in_ch, out_ch, k=3, s=1, p=1, groups=1, act=True, norm=False):
+    layers = [nn.Conv2d(in_ch, out_ch, k, s, p, groups=groups, bias=False)]
+    if norm: layers.append(nn.BatchNorm2d(out_ch))
+    if act: layers.append(nn.SiLU(inplace=True))
+    return nn.Sequential(*layers)
+
+class PixelUnshuffleDown8(nn.Module):
+    def __init__(self, out_ch=64, preblur=False):
+        super().__init__()
+        self.preblur = preblur
+        if preblur:
+            # minimal anti-alias (separable 3x3 box)
+            self.blur = nn.Conv2d(3, 3, 3, 1, 1, groups=3, bias=False)
+            with torch.no_grad():
+                self.blur.weight.data.fill_(1/9.)
+        self.unshuffle = nn.PixelUnshuffle(8)  # 3×64 → 192 channels
+        self.proj = conv_module(3 * 8 * 8, out_ch, k=1, s=1, p=0)  # 192→C
+
+    def forward(self, x):
+        if self.preblur: x = self.blur(x)
+        x = self.unshuffle(x)   # [B, 192, H/8, W/8]
+        x = self.proj(x)        # [B, C, H/8, W/8]
+        return x
+
 class ShallowModule(nn.Module):
     def __init__(self, in_chans, out_chans, kernel_size=3, stride=1):
         super(ShallowModule, self).__init__()
@@ -50,7 +111,6 @@ class ShallowModule(nn.Module):
         self.out_chans = out_chans
         self.kernel_size = kernel_size
         self.stride = stride
-        
         self.conv = nn.Conv2d(in_chans, out_chans, kernel_size, stride, kernel_size//2)
         
     def forward(self, x):
@@ -374,7 +434,7 @@ class EncoderStage(nn.Module):
         self.num_head = num_head
         self.window_size = window_size
         shift = window_size//2
-        
+        # self.reduce_conv = nn.Conv2d(dim * 2, dim, 1)
         self.blocks = nn.ModuleList()
         for d in range(depth):
             self.blocks.add_module(
@@ -384,6 +444,7 @@ class EncoderStage(nn.Module):
                                  attn_drop, proj_drop, drop_path, helper, mv_act))
             
     def forward(self, x):
+        # x = self.reduce_conv(x)
         sp, ch = None, None
         for i, blk in enumerate(self.blocks):
             x, sp, ch, attn = blk(x, sp, ch)
@@ -417,7 +478,6 @@ class Downsizing(nn.Module):
 
     def forward(self, x):
         B, C, H, W = x.size()
-        
         # Concat 2x2
         x0 = x[:, :, 0::2, 0::2]  # [B, C, H/2, W/2], top-left
         x1 = x[:, :, 0::2, 1::2]  # [B, C, H/2, W/2], top-right
@@ -426,17 +486,13 @@ class Downsizing(nn.Module):
         x = torch.cat([x0, x1, x2, x3], dim=1)  # [B, 4C, H/2, W/2]
         return self.reduction(self.norm(x)) # [B, C, H/2, W/2]
     
-    def flops(self, resolutions):
-        H,W = resolutions
-        flops = self.norm.flops((H//2,W//2)) + self.reduction.flops((H//2,W//2))
-        return flops  
-
 class Bottleneck(nn.Module):
     def __init__(self, dim, num_stages, act_layer=nn.GELU, norm_layer=ReshapeLayerNorm, 
                  mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
         super(Bottleneck, self).__init__()
         self.dim = dim
-        self.cat_dim = dim * num_stages
+        self.cat_dim = dim * num_stages # 3
+        self.factors = [4, 2, 1]
         if mv_ver==1:
             self.mobivari = MobiVari1(self.cat_dim, 3, 1, act=mv_act, out_dim=dim)
         elif mv_ver==2:
@@ -444,13 +500,24 @@ class Bottleneck(nn.Module):
         self.act = act_layer()
         self.norm = norm_layer(dim)
                 
-    def forward(self, x_list):
-        xs = x_list[0]
-        new_x = []
-        for i in range(len(x_list[1:])):
-            x_ = x_list[i+1] + F.leaky_relu(xs)
-            new_x.append(x_)
-        new_x = self.norm(self.mobivari(torch.cat(new_x, dim=1)))
+    def forward(self, x_list, same_size=False):
+        if not same_size:
+            xs = x_list[-1]
+            new_x = []
+            for i in range(len(x_list[:-1])):
+                xd = downsample2d(x_list[i], self.factors[i])
+                x_ = xs + xd
+                new_x.append(x_)
+            new_x = self.norm(self.mobivari(torch.cat(new_x, dim=1)))
+            
+        else:
+            xs = x_list[0]
+            new_x = []
+            for i in range(len(x_list[1:])):
+                x_ = x_list[i+1] + xs
+                new_x.append(x_)
+            new_x = self.norm(self.mobivari(torch.cat(new_x, dim=1)))
+            
         return new_x
     
     def flops(self, resolutions):
@@ -469,18 +536,26 @@ class HRAMi(nn.Module):
         super(HRAMi, self).__init__()
         self.dim = dim
         self.kernel_size = kernel_size
+        self.factors = [4, 2, 1, 1]  # down-sample rate
         if mv_ver==1:
             self.mobivari = MobiVari1(dim * 4, kernel_size, stride, act=mv_act, out_dim=dim)
         elif mv_ver==2:
             self.mobivari = MobiVari2(dim * 4, kernel_size, stride, act=mv_act, out_dim=dim, exp_factor=exp_factor, expand_groups=expand_groups)
             
-    def forward(self, attn_list):
-        x = torch.cat(attn_list, dim=1)
-        x = self.mobivari(x)
+    def forward(self, attn_list, same_size=False):
+        if not same_size:
+            processed = []
+            for i, attn in enumerate(attn_list): 
+                attn_ds = downsample2d(attn, self.factors[i], mode="area")
+                processed.append(attn_ds)
+                
+            x = torch.cat(processed, dim=1)
+            x = self.mobivari(x)
+            
+        else:
+            x = torch.cat(attn_list, dim=1)
+            x = self.mobivari(x)
         return x
-    
-    def flops(self, resolutions):
-        return self.mobivari.flops(resolutions)
   
 class Reconstruction(nn.Module):
     def __init__(self, out_chans, dim, kernel_size=3, stride=1, num_mv=2, mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
@@ -509,8 +584,7 @@ class Reconstruction(nn.Module):
         flops += H*W * self.kernel_size*self.kernel_size * self.dim * self.out_chans*(self.upscale**2) # self.conv
         flops += H*W * self.kernel_size*self.kernel_size * self.out_chans * self.out_chans # self.final_conv
         return flops
-  
-  
+   
 class SEGate2d(nn.Module):
     """
         x: [B, C, H, W]  ->  g: [B, d, H, W]  (sigmoid门控)
@@ -577,6 +651,30 @@ class CBAMGate2d(nn.Module):
         g = g_c * s_map                                             # [B, d, H, W]
         
         return g
+
+class CondConvResidual(nn.Module):
+    def __init__(self, lnt_dim, channel, K=3):
+        """
+            lnt_dim: latent dimension
+            channel: CondConvResidual module dimension 
+            K: Number of experts
+        """
+        super().__init__()
+        # K depthwise experts + 1×1 融合
+        self.depthwise_convs = nn.ModuleList([
+                nn.Conv2d(channel, channel, 3, padding=1, groups=channel, bias=False) 
+                    for _ in range(K)])
+        self.point_conv = nn.Conv2d(channel, lnt_dim, 1, bias=False)
+        self.router = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1), 
+            nn.Conv2d(channel, K, 1))
+        
+    def forward(self, x_img, x_lnt):
+        a = torch.softmax(self.router(x_img).flatten(1), dim=1)  # [B, K]
+        dTs = torch.stack([self.depthwise_convs[k](x_lnt) 
+                            for k in range(len(self.depthwise_convs))], dim=1)  # [B,K,d,H,W]
+        mix = (a[:, :, None, None, None] * dTs).sum(dim=1)        # [B,d,H,W]
+        return self.point_conv(mix)
 
 class RAMiTModule(nn.Module):
     def __init__(self, 
@@ -656,6 +754,7 @@ class RAMiTModule(nn.Module):
           out: tensor of shape [B, 320, H, W] combining all.
         """
         shallow = self.shallow(rgb_latent)
+        
         o1, attn1 = self.stage1(shallow) # [B, C, H//8, W//8]
         o2, attn2 = self.stage2(o1)         # [B, C, H//8, W//8]
         o3, attn3 = self.stage3(o2)         # [B, C, H//8, W//8]
@@ -729,11 +828,155 @@ class RAMiT(nn.Module):
                 nwd.add(n)
         return nwd
 
+class RAMiTCond(RAMiTModule):
+    def __init__(self, 
+                 in_chans=4, 
+                 dim=24, 
+                 depths=(6,4,4,6),
+                 lnt_depths=(1, 2, 2, 1),
+                 num_heads=(4,4,4,4), 
+                 head_dim=None, 
+                 chsa_head_ratio=0.25,
+                 window_size=4, 
+                 hidden_ratio=2.0, 
+                 qkv_bias=True, 
+                 mv_ver=1, 
+                 exp_factor=1.2, 
+                 expand_groups=4,
+                 act_layer=nn.GELU, 
+                 norm_layer=ReshapeLayerNorm, 
+                 tail_mv=2, 
+                 target_mode='light_dr', 
+                 img_norm=True,
+                 attn_drop=0.0, 
+                 proj_drop=0.0, 
+                 drop_path=0.0, 
+                 helper=True, 
+                 mv_act=nn.LeakyReLU):
+        super(RAMiTCond, self).__init__()
+        
+        self.unit = 2 ** (len(depths)-2) * window_size
+        self.in_chans = in_chans
+        self.dim = dim
+        self.depths = depths
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.window_size = window_size
+        self.hidden_ratio = hidden_ratio
+        self.qkv_bias = qkv_bias
+        self.act_layer = act_layer
+        norm_layer = ReshapeLayerNorm if norm_layer == 'ReshapeLayerNorm' else norm_layer
+        self.norm_layer = norm_layer = ReshapeLayerNorm if norm_layer == 'ReshapeLayerNorm' else norm_layer
+        self.tail_mv = tail_mv
+        
+        self.scale = 1
+        self.mean, self.std = mean_std(self.scale, target_mode)
+        self.target_mode = target_mode
+        self.img_norm = img_norm
+        self.reduce_conv = nn.Conv2d(2 * dim, dim, 1)
+        # Modules for image
+        self.shallow_image = PixelUnshuffleDown8(out_ch=dim, preblur=False)
+        # Modules for latent
+        self.shallow_latent = ShallowModule(4, dim, 1, 1) # 1x1 Conv with stride 1
+        
+        self.stage1 = EncoderStage(depths[0], dim, num_heads[0], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
+                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
+        self.down1 = Downsizing(dim, dim, norm_layer, mv_ver, mv_act)
+        self.stage2 = EncoderStage(depths[1], dim, num_heads[1], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
+                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
+        self.down2 = Downsizing(dim, dim, norm_layer, mv_ver, mv_act)
+        self.stage3 = EncoderStage(depths[2], dim, num_heads[2], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
+                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
+        self.bottleneck = Bottleneck(dim, len(depths)-1, act_layer, norm_layer, mv_ver, mv_act)
+        self.stage4 = EncoderStage(depths[3], dim, num_heads[3], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
+                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
+        self.attn_mix = HRAMi(dim, 3, 1, mv_ver, mv_act)
+        self.residual = CondConvResidual(lnt_dim=in_chans, channel=dim)
+        # self.scale_residual = CBAMGate2d(in_channels=dim, out_channels=in_chans)
 
-if __name__ == '__main__':
-    H = 352 // 8
-    W = 1216 // 8
-    x = torch.randn(4, 4, H, W)
+        self.apply(self._init_weights)
+
+    def forward_size_norm(self, x):
+        _, _, h, w = x.size()
+        padh = self.unit-(h % self.unit) if h % self.unit != 0 else 0
+        padw = self.unit-(w % self.unit) if w % self.unit != 0 else 0
+        x = TF.pad(x, (0, 0, padw, padh))
+
+        return x
+
+    def forward(self, rgb_image, rgb_latent):
+        """
+        Forward pass of the fusion module.
+        Inputs:
+          rgb_latent: tensor of shape [B, 4, H, W]
+          split as (rgb_latent, depth_latent): tensors of shape [B, 4, H, W].
+        Output:
+          out: tensor of shape [B, 320, H, W] combining all.
+        """
+        x_img = self.shallow_image(rgb_image)     # [B, C, H//8, W//8]
+        x_lnt = self.shallow_latent(rgb_latent)   # [B, C, H//8, W//8]
+        # (f"Image: {x_img.shape}, Latent: {x_lnt.shape}")
+        o0 = torch.cat((x_img, x_lnt), dim=1)
+        o0 = self.reduce_conv(o0)
+
+        o1_, attn1 = self.stage1(o0)     # [B, C, H//8, W//8]
+        # print(f"Stage1: {o1_.shape}")        
+        o2_, attn2 = self.stage2(o1_) # [B, C, H//8, W//8]
+        # print(f"Stage2: {o2_.shape}")
+        o3_, attn3 = self.stage3(o2_) # [B, C, H//8, W//8]
+        # print(f"Stage3: {o3_.shape}")
+        ob = self.bottleneck(
+            [x_img, o1_, o2_, o3_],
+            same_size=True)   # [B, C, H//8, W//8]
+        o4, attn4 = self.stage4(ob)     # [B, C, H//8, W//8]
+        mix = self.attn_mix(
+            [attn1, attn2, attn3, attn4], 
+            same_size=True) # [B, C, H//8, W//8]
+        
+        o4 = o4 * mix # [B, C, H//8, W//8]
+        o5 = o4 + x_lnt
+        residual = self.residual(x_img, o5)
+        rs_latent = rgb_latent + residual
+        
+        return rs_latent
     
-    model = RAMiT()
-    output = model(x)
+    def _init_weights(self, m):
+        # Swin V2 manner
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+        # Additionally, if this is the to_target layer, initialize its weights and bias to zero
+        if hasattr(self, 'to_target') and m is self.to_target:
+            if hasattr(m, 'weight') and m.weight is not None:
+                nn.init.constant_(m.weight, 0)
+            if hasattr(m, 'bias') and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        
+        # if hasattr(self, 'residual') and m is self.residual:
+        #     if hasattr(m.point_conv, 'weight') and m.point_conv.weight is not None:
+        #         nn.init.constant_(m.point_conv.weight, 0)
+        #     if hasattr(m.point_conv, 'bias') and m.point_conv.bias is not None:
+        #         nn.init.constant_(m.point_conv.bias, 0)
+    
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        nwd = set()
+        for n, _ in self.named_parameters():
+            if 'relative_position_bias_table' in n:
+                nwd.add(n)
+        return nwd
+    
+if __name__ == '__main__':
+    H = 352
+    W = 1216
+    img = torch.randn(4, 3, H, W)
+    lnt = torch.randn(4, 4, H // 8, W //8)
+    
+    model = RAMiTCond()
+    output = model(img, lnt)
+    print(output.shape)

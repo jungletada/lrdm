@@ -1,11 +1,10 @@
-# Marigold Computer Vision
+# Latent Restoration Diffusion Model for Robust Monocular Depth Estimation under Adverse Weather
 
 <!-- This project implements Marigold, a Computer Vision method for estimating image characteristics. Initially proposed for
 extracting high-resolution depth maps in our CVPR 2024 paper **"Repurposing Diffusion-Based Image Generators for Monocular 
 Depth Estimation"**, we extended the method to other modalities as described in our follow-up paper **"Marigold: Affordable 
 Adaptation of Diffusion-Based Image Generators for Image Analysis"**.  -->
 
-## Marigold: Affordable Adaptation of Diffusion-Based Image Generators for Image Analysis
 
 [![Website](doc/badges/badge-website.svg)](https://marigoldcomputervision.github.io)
 [![Paper](doc/badges/badge-pdf.svg)](https://arxiv.org/abs/2505.09358)
@@ -29,7 +28,7 @@ Team:
 [Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ)
 
 
-## Repurposing Diffusion-Based Image Generators for Monocular Depth Estimation
+<!-- ## Repurposing Diffusion-Based Image Generators for Monocular Depth Estimation
 
 [![Website](doc/badges/badge-website.svg)](https://marigoldmonodepth.github.io)
 [![Paper](doc/badges/badge-pdf.svg)](https://arxiv.org/abs/2312.02145)
@@ -44,7 +43,7 @@ Team:
 [Shengyu Huang](https://shengyuh.github.io/),
 [Nando Metzger](https://nandometzger.github.io/),
 [Rodrigo Caye Daudt](https://rcdaudt.github.io/),
-[Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ)
+[Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ) -->
 
 ## 🚀 Usage
 

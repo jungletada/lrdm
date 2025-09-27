@@ -34,8 +34,7 @@ class WeatherKITTLatentDataset(Dataset):
         with open(filename_ls_path, "r") as f:
             self.filenames = [
                 s.split() for s in f.readlines()
-            ] 
-        # Filter out empty depth
+            ]
         self.filenames = [f for f in self.filenames if "None" != f[1]]
         self.rgb_latent = [os.path.join(self.rgb_path, filename_line[0][11:].replace('.png', '.npy'))
                           for filename_line in self.filenames]

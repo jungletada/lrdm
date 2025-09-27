@@ -10,7 +10,7 @@ dataloader:
   num_workers: 8
   effective_batch_size: 64
   max_train_batch_size: 32
-  seed: 3407  # to ensure continuity when resuming from checkpoint
+  seed: 3047  # to ensure continuity when resuming from checkpoint
 
 model:
   dim: 64
@@ -21,7 +21,7 @@ trainer:
   name: RAMiTLatentTrainer
   training_noise_scheduler:
     pretrained_path: checkpoint/ramit_restore
-  init_seed: 3407  # use null to train w/o seeding
+  init_seed: 3047  # use null to train w/o seeding
   save_period: 2000
   backup_period: 2000
 
@@ -36,5 +36,5 @@ lr_scheduler:
   name: IterExponential
   kwargs:
     total_iter: 80000
-    final_ratio: 0.01
+    final_ratio: 0.005
     warmup_steps: 100
