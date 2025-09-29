@@ -229,14 +229,14 @@ class WeatherKITTILatentSceneDataset(WeatherKITTLatentDataset):
             latent = torch.from_numpy(latent).squeeze()
             if domain == 'sunny':
                 if flip_flag:
-                    sample['sunny'] = (image.flip(dims=[-1]), latent.flip(dims=[-1]))
+                    sample['sunny'] = image.flip(dims=[-1])
                 else:
-                    sample['sunny'] = (image, latent)
+                    sample['sunny'] = image
             else:
                 if flip_flag:
-                    sample['weather'].append((image.flip(dims=[-1]), latent.flip(dims=[-1])))
+                    sample['weather'].append(image.flip(dims=[-1]))
                 else:
-                    sample['weather'].append((image, latent))
+                    sample['weather'].append(image)
 
         return sample
 
@@ -250,8 +250,8 @@ if __name__ == '__main__':
     sunny = item['sunny']
     weather_list = item['weather']
     
-    print("Sunny: ", sunny[0].shape, sunny[1].shape)
+    print("Sunny: ", sunny.shape)
     print(item['index'])
     for weather in weather_list:
-        print(weather[0].shape, weather[1].shape)
+        print(weather[0].shape)
     

@@ -16,6 +16,13 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
+from diffusers import (
+    AutoencoderKL,
+    DDIMScheduler,
+    DiffusionPipeline,
+    LCMScheduler,
+    UNet2DConditionModel,
+)
 
 from src.util.data_loader import skip_first_batches
 from src.util.logging_util import tb_logger
@@ -142,6 +149,7 @@ class RAMiTLatentTrainer:
         device,
         out_dir_ckpt,
         accumulation_steps: int,
+        vae: AutoencoderKL,
     ):
         self.cfg: OmegaConf = cfg
         self.model: nn.Module = model
@@ -153,7 +161,8 @@ class RAMiTLatentTrainer:
         self.train_loader: DataLoader = train_dataloader
         self.visualize_dataset: DataLoader = visualize_dataset
         self.accumulation_steps: int = accumulation_steps
-        
+        self.vae = vae
+        self.vae.requires_grad_(False)
         # Optimizer !should be defined after input layer is adapted
         lr = self.cfg.lr
         self.optimizer = AdamW(self.model.parameters(), lr=lr)
@@ -168,6 +177,7 @@ class RAMiTLatentTrainer:
 
         # Building Loss
         self.smooth_l1_loss = nn.SmoothL1Loss()
+        self.restore_loss = nn.MSELoss()
         self.train_metrics = MetricTracker(*["loss"])
     
         # Settings
@@ -185,7 +195,7 @@ class RAMiTLatentTrainer:
         self.in_evaluation = False
         self.global_seed_sequence: List = []  # consistent global seed sequence, used to seed random generator, to ensure consistency when resuming
 
-    def train_process(self, t_end=None):
+    def train(self, t_end=None):
         logging.info("Start training")
         device = self.device
         self.model.to(device)
@@ -215,9 +225,14 @@ class RAMiTLatentTrainer:
                     rand_num_generator = None
 
                 # >>> With gradient accumulation >>>
-                sunny, weather_list, scene_ids = batch['sunny'], batch['weather'], batch['index']
+                with torch.no_grad():
+                    sunny = (batch['sunny'], self.encode_to_latent(batch['sunny'])) 
+                    weather_list = [(batch['weather'][j], self.encode_to_latent(batch['weather'][j])) for j in len(batch['weather'])]
+                scene_ids = batch['index']
+
                 assert isinstance(weather_list, (list, tuple))
                 num_domains = len(weather_list)
+
                 # 1) 前向
                 pred_sunny = self.model(sunny[0], sunny[1])       # 晴 -> 晴（恒等）
                 pred_weathers = [self.model(weather_list[j][0], weather_list[j][1]) for j in range(num_domains)]  # 多风格 -> 晴
@@ -242,82 +257,31 @@ class RAMiTLatentTrainer:
                 # 5) 多源 CORAL（坏天气→晴天，二阶统计对齐；Deep CORAL:contentReference[oaicite:4]{index=4}）
                 L_coral = coral_multi_to_sunny(pred_sunny, pred_weathers)
 
-                # 6) PatchGAN 多类域对抗（K+1 域；PatchGAN 思想来自 pix2pix:contentReference[oaicite:5]{index=5}）
-                #    若 D 内部接了 GRL，则生成端的对抗项就是下面的 CE；若未接 GRL，可用 L_adv = -L_D。
-                logits_s = self.discriminator(pred_sunny)   # 晴域 logits: [B, C_dom, h', w']
-                logits_w = [self.discriminator(pred_wtr) for pred_wtr in pred_weathers]       # 各坏天气域 logits
+                # # 6) PatchGAN 多类域对抗（K+1 域；PatchGAN 思想来自 pix2pix:contentReference[oaicite:5]{index=5}）
+                # #    若 D 内部接了 GRL，则生成端的对抗项就是下面的 CE；若未接 GRL，可用 L_adv = -L_D。
+                # logits_s = self.discriminator(pred_sunny)   # 晴域 logits: [B, C_dom, h', w']
+                # logits_w = [self.discriminator(pred_wtr) for pred_wtr in pred_weathers]       # 各坏天气域 logits
                 
-                # 约定 domain 索引：晴=0；每种坏天气依次 1..m
-                sunny_id = 0
-                domain_ids = list(range(1, num_domains + 1))
-                L_discrinative = ce_patch(logits_s, sunny_id) + torch.stack([
-                    ce_patch(lw, domain_ids[j]) for j, lw in enumerate(logits_w)
-                ]).mean()
+                # # 约定 domain 索引：晴=0；每种坏天气依次 1..m
+                # sunny_id = 0
+                # domain_ids = list(range(1, num_domains + 1))
+                # L_discrinative = ce_patch(logits_s, sunny_id) + torch.stack([
+                #     ce_patch(lw, domain_ids[j]) for j, lw in enumerate(logits_w)
+                # ]).mean()
 
-                use_grl = True  # 如果 D 或连接到 D 的桥里实现了 GRL，就置 True
-                L_adv = L_discrinative if use_grl else (-L_discrinative)
+                # use_grl = True  # 如果 D 或连接到 D 的桥里实现了 GRL，就置 True
+                # L_adv = L_discrinative if use_grl else (-L_discrinative)
+
+                with torch.no_grad():
+                    decoded_rgb_list = [self.decode_to_rgb(pred_wtr) 
+                                    for pred_wtr in pred_weathers]  # [B, 4, h, w]
+                    decoded_rgb_list.append(self.decode_to_rgb(pred_sunny))
+
+                L_restore = torch.stack([self.restore_loss(decoded_rgb, sunny[0]) for decoded_rgb in decoded_rgb_list]).mean()
 
                 # 7) 总损失
-                L = lam1 * L_idendity + lam2 * L_reconstruct + lam3 * L_supcon + lam4 * L_var + lam5 * L_coral + lam6 * L_adv
+                loss = lam1 * L_idendity + lam2 * L_reconstruct + lam3 * L_supcon + lam4 * L_var + lam5 * L_coral + lam6 * L_restore
 
-        # 你也可以返回一个 dict 便于 log
-        logs = {
-            "L": L, "L_id": L_idendity, "L_rec": L_reconstruct, "L_supcon": L_supcon,
-            "L_var": L_var, "L_coral": L_coral, "L_adv": L_adv, "L_D": L_discrinative
-        }
-        return L, logs
-
-    def train(self, t_end=None):
-        logging.info("Start training")
-
-        device = self.device
-        self.model.to(device)
-
-        if self.in_evaluation:
-            logging.info(
-                "Last evaluation was not finished, will do evaluation before continue training."
-            )
-
-        self.train_metrics.reset()
-        accumulated_step = 0
-
-        for epoch in range(self.epoch, self.max_epoch + 1):
-            self.epoch = epoch
-            logging.debug(f"epoch: {self.epoch}")
-
-            # Skip previous batches when resume
-            for batch in skip_first_batches(self.train_loader, self.n_batch_in_epoch):
-                self.model.train()
-
-                # globally consistent random generators
-                if self.seed is not None:
-                    local_seed = self._get_next_seed()
-                    rand_num_generator = torch.Generator(device=device)
-                    rand_num_generator.manual_seed(local_seed)
-                else:
-                    rand_num_generator = None
-
-                # >>> With gradient accumulation >>>
-
-                # Load data with "input_latent" and "target_latent"
-                rgb_latent = batch["input_latent"].to(device)
-                rgb_image = batch["rgb_norm"].to(device)
-                target = batch["target_latent"].to(device)
-                
-                model_pred = self.model(rgb_image, rgb_latent)  # [B, 4, h, w]
-                
-                if torch.isnan(model_pred).any():
-                    logging.warning("model_pred contains NaN.")
-                    exit(0)
-
-                loss = self.smooth_l1_loss(model_pred, target)
-                # charbonnier_loss = self.charbonnier_loss(model_pred, target)
-                # ssim_loss = self.ssim_loss(model_pred, target)
-                # loss = 2 * smooth_l1_loss + charbonnier_loss + ssim_loss
-                
-                # self.train_metrics.update("smooth_l1_loss", smooth_l1_loss.item())
-                # self.train_metrics.update("charbonnier_loss", charbonnier_loss.item())
-                # self.train_metrics.update("ssim_loss", ssim_loss.item())
                 self.train_metrics.update("loss", loss.item())
                 loss = loss / self.gradient_accumulation_steps
                 loss.backward()
@@ -382,3 +346,45 @@ class RAMiTLatentTrainer:
 
             # Epoch end
             self.n_batch_in_epoch = 0
+        
+
+        # 你也可以返回一个 dict 便于 log
+        logs = {
+            "L": loss, "L_id": L_idendity, "L_rec": L_reconstruct, "L_supcon": L_supcon,
+            "L_var": L_var, "L_coral": L_coral, 
+        }
+        return loss, logs
+
+    @torch.no_grad()
+    def encode_to_latent(self, rgb_in: torch.Tensor) -> torch.Tensor:
+        """
+        Encode RGB image into latent.
+
+        Args:
+            rgb_in (`torch.Tensor`):
+                Input RGB image to be encoded.
+
+        Returns:
+            `torch.Tensor`: Image latent.
+        """
+        h = self.vae.encoder(rgb_in)
+        moments = self.vae.quant_conv(h)
+        mean, logvar = torch.chunk(moments, 2, dim=1)
+        rgb_latent = mean * self.latent_scale_factor    # scale latent
+
+        return rgb_latent
+    
+    @torch.no_grad()
+    def decode_to_rgb(self, latent: torch.Tensor) -> torch.Tensor:
+        """
+        Decode latent into rgb.
+
+        Args:
+            latent (`torch.Tensor`): latent to be decoded.
+        Returns:
+            `torch.Tensor`: rgb image.
+        """
+        latent = latent / self.latent_scale_factor # scale latent
+        z = self.vae.post_quant_conv(latent) # decode
+        rgb = self.vae.decoder(z)
+        return rgb
