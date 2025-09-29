@@ -41,6 +41,7 @@ class WeatherKITTLatentDataset(Dataset):
         
         self.target_latent = self.rgb_latent.copy()
         self.target_latent = self.target_latent * (self.weather_opt.num_domains + 1)
+        
         self.get_image_file_path()
         self.get_latent_file_path()
 
@@ -171,3 +172,86 @@ class WeatherKITTLatentDataset(Dataset):
         sample["rgb_norm"] = rgb_norm
         
         return sample
+
+
+class WeatherKITTILatentSceneDataset(WeatherKITTLatentDataset):
+    def __init__(self, 
+                 filename_ls_path='data_split/kitti_depth/eigen_train_files_with_gt.txt', 
+                 base_path='data/kitti/latent_train', 
+                 image_path='data/kitti', 
+                 flip_rate=0.5):
+        super().__init__(filename_ls_path, base_path, image_path, flip_rate)
+        self.domains = ['sunny', 'rain', 'raingan', 'snow', 'snowgan', 'fog1', 'fog2']
+        
+    def __len__(self):
+        return len(self.rgb_latent)
+    
+    def _get_data_path(self, index):
+        # Sunny domain (Original KITTI)
+        sunny_image_path = self.rgb_image[index]
+        sunny_latent_path = self.rgb_latent[index]
+        
+        # Weather domain (Weather KITTI)
+        rain_image_path = self.rain_image[index]
+        raingan_image_path = self.raingan_image[index]
+        snow_image_path = self.snow_image[index]
+        snowgan_image_path = self.snowgan_image[index]
+        fog1_image_path = self.fog1_image[index]
+        fog2_image_path = self.fog2_image[index]
+        
+        rain_latent_path = self.rain_latent[index]
+        raingan_latent_path = self.raingan_latent[index]
+        snow_latent_path = self.snow_latent[index]
+        snowgan_latent_path = self.snowgan_latent[index]
+        fog1_latent_path = self.fog1_latent[index]
+        fog2_latent_path = self.fog2_latent[index]
+        
+        return {'sunny': (sunny_image_path, sunny_latent_path),
+                'rain': (rain_image_path, rain_latent_path),
+                'raingan': (raingan_image_path, raingan_latent_path),
+                'snow': (snow_image_path, snow_latent_path),
+                'snowgan': (snowgan_image_path, snowgan_latent_path),
+                'fog1': (fog1_image_path, fog1_latent_path),
+                'fog2': (fog2_image_path, fog2_latent_path),
+                }
+    
+    def __getitem__(self, index):
+        path_dict = self._get_data_path(index=index)
+        ids = torch.tensor(index, dtype=torch.int64)
+        sample =  {"index": index, "rgb_relative_path": path_dict['sunny'][0]}
+
+        sample['weather'] = []
+        flip_flag = True if np.random.rand() < self.flip_rate else False
+            
+        for domain in self.domains:
+            image = self._load_rgb_data(os.path.join(self.image_path, path_dict[domain][0]))["rgb_norm"]
+            latent = np.load(os.path.join(self.base_path, path_dict[domain][1]))
+            latent = torch.from_numpy(latent).squeeze()
+            if domain == 'sunny':
+                if flip_flag:
+                    sample['sunny'] = (image.flip(dims=[-1]), latent.flip(dims=[-1]))
+                else:
+                    sample['sunny'] = (image, latent)
+            else:
+                if flip_flag:
+                    sample['weather'].append((image.flip(dims=[-1]), latent.flip(dims=[-1])))
+                else:
+                    sample['weather'].append((image, latent))
+
+        return sample
+
+
+if __name__ == '__main__':
+    dataset = WeatherKITTILatentSceneDataset()
+    print(f"Total images: {len(dataset)}")
+    
+    # Example
+    item = dataset[20]
+    sunny = item['sunny']
+    weather_list = item['weather']
+    
+    print("Sunny: ", sunny[0].shape, sunny[1].shape)
+    print(item['index'])
+    for weather in weather_list:
+        print(weather[0].shape, weather[1].shape)
+    

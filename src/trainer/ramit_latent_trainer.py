@@ -1,5 +1,6 @@
 import os
 import logging
+from tqdm import tqdm
 from PIL import Image
 import numpy as np
 from datetime import datetime
@@ -13,7 +14,7 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
-from tqdm import tqdm
+
 from typing import List, Union, Optional
 
 from src.util.data_loader import skip_first_batches
