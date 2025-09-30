@@ -55,7 +55,7 @@ from .util.image_util import (
     get_tv_resample_method,
     resize_max_res,
 )
-from marigold.ramit_model.ramit import RAMiTModule
+from marigold.ramit_model.ramit import RAMiTCond
 
 
 class MarigoldDepthOutput(BaseOutput):
@@ -122,6 +122,7 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         self,
         unet: UNet2DConditionModel,
         vae: AutoencoderKL,
+        adapter: RAMiTCond,
         scheduler: Union[DDIMScheduler, LCMScheduler],
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
@@ -137,7 +138,9 @@ class MarigoldDepthPipeline(DiffusionPipeline):
             scheduler=scheduler,
             text_encoder=text_encoder,
             tokenizer=tokenizer,
+            adapter=adapter,
         )
+        
         self.register_to_config(
             scale_invariant=scale_invariant,
             shift_invariant=shift_invariant,
@@ -151,7 +154,15 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         self.default_processing_resolution = default_processing_resolution
 
         self.empty_text_embed = None
-        
+    
+    @property
+    def dtype(self):
+        if hasattr(self, "unet") and self.unet is not None:
+            return getattr(self.unet, "dtype", torch.float32)
+        if hasattr(self, "vae") and self.vae is not None:
+            return getattr(self.vae, "dtype", torch.float32)
+        return torch.float32
+    
     @torch.no_grad()
     def __call__(
         self,

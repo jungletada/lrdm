@@ -800,7 +800,7 @@ class RAMiTModule(nn.Module):
 class RAMiT(nn.Module):
     def __init__(self, **kwargs):
         super(RAMiT, self).__init__()
-        self.ramit_module = RAMiTModule(**kwargs)
+        self.ramit_module = RAMiTCond(**kwargs)
         self.new_conv_in = nn.Conv2d(12, 320, kernel_size=3, padding=1)
 
     def forward(self, sample):
@@ -812,10 +812,8 @@ class RAMiT(nn.Module):
         Output:
           out: tensor of shape [B, 320, H, W] combining all.
         """
-        rgb_latent, depth_latent = torch.split(sample, [4, 4], dim=1)
-        ra_latent = self.ramit_module(rgb_latent)
-        
-        out = torch.cat((rgb_latent, ra_latent, depth_latent), dim=1) # [B, 12, H, W]
+        revised_latent = self.ramit_module(sample['rgb_image'], sample['rgb_latent'])
+        out = torch.cat((sample['rgb_latent'], revised_latent, sample['noisy_latent']), dim=1) # [B, 12, H, W]
         out = self.new_conv_in(out)     # [B, 320, H, W]
         
         return out
@@ -833,7 +831,6 @@ class RAMiTCond(RAMiTModule):
                  in_chans=4, 
                  dim=24, 
                  depths=(6,4,4,6),
-                 lnt_depths=(1, 2, 2, 1),
                  num_heads=(4,4,4,4), 
                  head_dim=None, 
                  chsa_head_ratio=0.25,
@@ -893,7 +890,6 @@ class RAMiTCond(RAMiTModule):
         self.attn_mix = HRAMi(dim, 3, 1, mv_ver, mv_act)
         self.residual = CondConvResidual(lnt_dim=in_chans, channel=dim)
         # self.scale_residual = CBAMGate2d(in_channels=dim, out_channels=in_chans)
-
         self.apply(self._init_weights)
 
     def forward_size_norm(self, x):
@@ -904,6 +900,11 @@ class RAMiTCond(RAMiTModule):
 
         return x
 
+    @property
+    def dtype(self):
+        p = next(self.parameters(), None)
+        return p.dtype if p is not None else torch.float32
+    
     def forward(self, rgb_image, rgb_latent):
         """
         Forward pass of the fusion module.

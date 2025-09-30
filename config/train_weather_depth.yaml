@@ -29,19 +29,19 @@ augmentation:
 dataloader:
   num_workers: 2
   effective_batch_size: 32
-  max_train_batch_size: 4
-  seed: 3407  # to ensure continuity when resuming from checkpoint
+  max_train_batch_size: 8
+  seed: 2040  # to ensure continuity when resuming from checkpoint
 
 trainer:
   name: WeatherRAMDepthTrainer
   training_noise_scheduler:
     pretrained_path: marigold-depth-v1-1
-  init_seed: 3407  # use null to train w/o seeding
+  init_seed: 2040  # use null to train w/o seeding
   save_period: 50
   backup_period: 2000
   validation_period: 500
-  
   visualization_period: 1000
+  training_version: encoder_only # full, encoder_only, ramit_only
 
 multi_res_noise:
   strength: 0.9
@@ -52,7 +52,7 @@ gt_depth_type: depth_filled_norm
 gt_mask_type: null # valid_mask_raw
 
 max_epoch: 10000  # a large enough number
-max_iter: 20000   # usually converges at around 20k
+max_iter: 25000   # usually converges at around 25k
 
 optimizer:
   name: Adam
@@ -66,9 +66,11 @@ lr: 3.0e-05
 lr_scheduler:
   name: IterExponential
   kwargs:
-    total_iter: 20000
+    total_iter: 25000
     final_ratio: 0.01
     warmup_steps: 100
+weight_decay: 1.0e-2
+head_lr_mult: 3.0
 
 # Light setting for the in-training validation and visualization
 validation:

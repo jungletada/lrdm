@@ -41,7 +41,7 @@ import numpy as np
 import torch
 from torch.nn import Conv2d
 from torch.nn.parameter import Parameter
-from torch.optim import Adam
+
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from diffusers import DDPMScheduler, DDIMScheduler
@@ -97,7 +97,7 @@ class WeatherRAMDepthTrainer:
         self.lambda_weather = 1.0
         
         # Adapt input layers
-        self.replace_convin_with_ramit()
+        self._replace_unet_conv_in()
 
         # Encode empty text prompt
         self.model.encode_empty_text()
@@ -108,11 +108,9 @@ class WeatherRAMDepthTrainer:
         # Trainability
         self.model.vae.requires_grad_(False)
         self.model.text_encoder.requires_grad_(False)
-        self.model.unet.requires_grad_(True)
-
-        # Optimizer should be defined after input layer is adapted !
-        lr = self.cfg.lr
-        self.optimizer = Adam(self.model.unet.parameters(), lr=lr)
+        
+        self.configure_training()
+        self.build_optimizer()
 
         # LR scheduler
         lr_func = IterExponential(
@@ -195,48 +193,196 @@ class WeatherRAMDepthTrainer:
         self.global_seed_sequence: List = []  # consistent global seed sequence, used to seed random generator, to ensure consistency when resuming
 
     def _replace_unet_conv_in(self):
-        # replace the first layer to accept 8 in_channels
-        _weight = self.model.unet.conv_in.weight.clone()  # [320, 4, 3, 3]
-        _bias = self.model.unet.conv_in.bias.clone()  # [320]
-        _weight = _weight.repeat((1, 2, 1, 1))  # Keep selected channel(s)
-        # half the activation magnitude
-        _weight *= 0.5
-        # new conv_in channel
-        _n_convin_out_channel = self.model.unet.conv_in.out_channels
-        _new_conv_in = Conv2d(
-            8, _n_convin_out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
-        )
-        _new_conv_in.weight = Parameter(_weight)
-        _new_conv_in.bias = Parameter(_bias)
-        self.model.unet.conv_in = _new_conv_in
-        logging.info("Unet conv_in layer is replaced")
-        # replace config
-        self.model.unet.config["in_channels"] = 8
-        logging.info("Unet config is updated")
+        
+        if self.model.unet.config["in_channels"] == 4:
+            # replace the first layer to accept 8 in_channels
+            _weight = self.model.unet.conv_in.weight.clone()  # [320, 4, 3, 3]
+            _bias = self.model.unet.conv_in.bias.clone()  # [320]
+            _weight = _weight.repeat((1, 2, 1, 1))  # Keep selected channel(s)
+            # half the activation magnitude
+            _weight *= 0.5
+            # new conv_in channel
+            _n_convin_out_channel = self.model.unet.conv_in.out_channels
+            _new_conv_in = Conv2d(
+                8, _n_convin_out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+            )
+            _new_conv_in.weight = Parameter(_weight)
+            _new_conv_in.bias = Parameter(_bias)
+            self.model.unet.conv_in = _new_conv_in
+            logging.info("Unet conv_in layer is replaced")
+            # replace config
+            self.model.unet.config["in_channels"] = 8
+            logging.info(f"Unet config is updated, in_channels from 4 to 8.")
+            
+        # elif self.model.unet.config["in_channels"] == 8:
+        #     # replace the first layer to accept 12 in_channels
+        #     _weight = self.model.unet.conv_in.weight.clone()  # [320, 8, 3, 3]
+        #     _bias = self.model.unet.conv_in.bias.clone()  # [320]
+        #     _weight_a, _weight_b = _weight.split(4, dim=1)  # Keep selected channel(s)
+        #     _weight_a_copy = _weight_a * 0.5
+        #     # half the activation magnitude
+        #     new_weight = torch.cat((_weight_a, _weight_a_copy, _weight_b), dim=1)
+        #     # new conv_in channel
+        #     _n_convin_out_channel = self.model.unet.conv_in.out_channels
+        #     _new_conv_in = Conv2d(
+        #         12, _n_convin_out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+        #     )
+        #     _new_conv_in.weight = Parameter(new_weight)
+        #     _new_conv_in.bias = Parameter(_bias)
+        #     self.model.unet.conv_in = _new_conv_in
+        #     logging.info("Unet conv_in layer is replaced")
+        #     # replace config
+        #     self.model.unet.config["in_channels"] = 12
+        #     logging.info("Unet config is updated, in_channels from 8 to 12.")
+            
         return
 
     def replace_convin_with_ramit(self):
-        _weight = self.model.unet.conv_in.weight.clone()  # [320, 8, 3, 3]
-        _bias = self.model.unet.conv_in.bias.clone()  # [320]
+        # _weight = self.model.unet.conv_in.weight.clone()  # [320, 8, 3, 3]
+        # _bias = self.model.unet.conv_in.bias.clone()  # [320]
 
         # shape check
-        out_c, in_c, kh, kw = _weight.shape
-        if not (out_c == 320 and in_c == 8 and kh == 3 and kw == 3):
-            raise ValueError(f"Expected conv_in weight shape [320, 8, 3, 3], got {_weight.shape}")
-        half = in_c // 2  # 4
-        w1 = _weight[:, :half].contiguous() * 0.9  # [320, 4, 3, 3]
-        w2 = _weight[:, half:].contiguous() * 0.1  # [320, 4, 3, 3]
-        w0 = w1.clone()                       # [320, 4, 3, 3]
+        # out_c, in_c, kh, kw = _weight.shape
+        # if not (out_c == 320 and in_c == 8 and kh == 3 and kw == 3):
+        #     raise ValueError(f"Expected conv_in weight shape [320, 8, 3, 3], got {_weight.shape}")
+        # half = in_c // 2  # 4
+        # w1 = _weight[:, :half].contiguous() * 0.9  # [320, 4, 3, 3]
+        # w2 = _weight[:, half:].contiguous() * 0.1  # [320, 4, 3, 3]
+        # w0 = w1.clone()                       # [320, 4, 3, 3]
         
-        expanded_weight = torch.cat([w1, w0, w2], dim=1).contiguous()  # [320, 12, 3, 3]
+        #expanded_weight = torch.cat([w1, w0, w2], dim=1).contiguous()  # [320, 12, 3, 3]
 
         self.model.unet.conv_in = RAMiT()
-        ramit_checkpoint = torch.load(self.cfg.ramit_path, map_location='cpu')
-        self.model.unet.conv_in.ramit_module.load_state_dict(ramit_checkpoint)
-        self.model.unet.conv_in.new_conv_in.weight = Parameter(expanded_weight)
+        # ramit_checkpoint = torch.load(self.cfg.ramit_path, map_location='cpu')
+        # self.model.unet.conv_in.ramit_module.load_state_dict(ramit_checkpoint)
+        # self.model.unet.conv_in.new_conv_in.weight = Parameter(expanded_weight)
         logging.info("Unet conv_in layer is replaced with our RAMiT")
         return
-        
+    
+    @staticmethod
+    def _set_requires_grad(module, flag: bool):
+        if module is None:
+            return
+        for p in module.parameters(recurse=True):
+            p.requires_grad = flag
+            
+    @staticmethod
+    def _maybe(module, name):
+        """若存在该属性则返回模块与名字，便于统一处理/打印。"""
+        return (name, getattr(module, name, None)) if hasattr(module, name) else (name, None)
+
+    def configure_training(self):
+        ver = self.cfg.trainer.training_version
+        # 1) freeze all unet parameters
+        self._set_requires_grad(self.model.unet, False)
+        self._set_requires_grad(self.model.adapter, True)
+        # 2) 常见子模块句柄（diffusers 的 UNet2DConditionModel 典型结构）
+        #    这些属性是否存在与具体版本有关，均做了 hasattr 防护
+        parts = dict([
+            self._maybe(self.model.unet, "time_proj"),
+            self._maybe(self.model.unet, "time_embedding"),     # 有些实现名为 time_embed
+            self._maybe(self.model.unet, "class_embedding"),    # 文本/类别条件可选
+            self._maybe(self.model.unet, "conv_in"),
+            self._maybe(self.model.unet, "down_blocks"),
+            self._maybe(self.model.unet, "mid_block"),
+            self._maybe(self.model.unet, "up_blocks"),
+            self._maybe(self.model.unet, "conv_norm_out"),
+            self._maybe(self.model.unet, "conv_out"),
+        ])
+
+        # 3) training version
+        if ver == "full":
+            self._set_requires_grad(self.model.unet, True)
+            logging.info(f"Using full unet parameters training.")
+            
+        elif ver == "encoder_only":
+            # 编码端 + 中间块参与训练；解码端与输出层冻结
+            for k in ["time_proj", "time_embedding", "class_embedding",
+                    "conv_in", "down_blocks", "mid_block"]:
+                self._set_requires_grad(parts.get(k), True)
+            # 其余保持冻结（up_blocks / conv_norm_out / conv_out）
+            logging.info(f"Using unet encoder parameters training.")
+            
+        elif ver == "ramit_only":
+            # 仅训练输入侧的适配/恢复模块。若你的 RAMiT 在 UNet 之外，请按需单独启用。
+            self._set_requires_grad(parts.get("conv_in"), True)
+            logging.info(f"Using restoration module parameters training.")
+        else:
+            raise NotImplementedError(f"Unknown training_version: {ver}")
+
+    def build_optimizer(self):
+        """
+        Call after requires_grad_() has been configured according to training_version.
+        - Default optimizer: Adam
+        - bias/Norm/Embedding -> no_decay
+        - Optional high-gradient groups: conv_in / time_* / self.model.ramit
+        Hyperparameters read from self.cfg (if present)
+        """
+        base_lr = self.cfg.lr
+        wd = self.cfg.weight_decay
+        lr_mult = self.cfg.head_lr_mult
+        version = self.cfg.trainer.training_version
+
+        # ---------- 收集可训练参数 ----------
+        def is_no_decay(name: str, p: torch.Tensor):
+            if p.ndim <= 1:
+                return True
+            lname = name.lower()
+            return any(k in lname for k in ["bias", "norm", "bn", "ln", "gn", "embedding"])
+
+        decay, no_decay, high_lr = [], [], []
+
+        # UNet 参数
+        for name, p in self.model.unet.named_parameters():
+            if not p.requires_grad:
+                continue
+            if is_no_decay(name, p):
+                no_decay.append(p)
+            else:
+                decay.append(p)
+            # 高学习率的子模块（在部分微调时更易收敛）
+            if version in ("encoder_only", "ramit_only"):
+                if name.startswith(("conv_in", "time_proj", "time_embedding", "class_embedding")):
+                    high_lr.append(p)
+
+        # 外部 RAMiT（如果集成为单独模块）
+        if hasattr(self.model, "adapter"):
+            print("hasattr(adapter)")
+            for name, p in self.model.adapter.named_parameters():
+                if p.requires_grad:
+                    # 视作高学习率组；是否衰减按形状再判断
+                    if is_no_decay(name, p):
+                        high_lr.append(p)  # 统一放高 LR 组，这里无需再分 decay/no_decay
+                    else:
+                        high_lr.append(p)
+
+        # 去重，避免同一参数被放入多个组
+        def _uniq(params):
+            return list({id(p): p for p in params}.values())
+
+        high_lr = _uniq(high_lr)
+        decay   = _uniq(decay)
+        no_decay= _uniq(no_decay)
+
+        high_ids = {id(p) for p in high_lr}
+        decay    = [p for p in decay    if id(p) not in high_ids]
+        no_decay = [p for p in no_decay if id(p) not in high_ids]
+
+        # ---------- 构建 param groups ----------
+        param_groups = []
+        if decay:
+            param_groups.append({"params": decay, "weight_decay": wd, "lr": base_lr})
+        if no_decay:
+            param_groups.append({"params": no_decay, "weight_decay": 0.0, "lr": base_lr})
+        if high_lr:
+            param_groups.append({"params": high_lr, "weight_decay": wd, "lr": base_lr * lr_mult})
+
+
+        self.optimizer = torch.optim.Adam(
+            param_groups,
+            lr=base_lr,
+        )
+
     def train(self, t_end=None):
         logging.info("Start training")
 
@@ -248,7 +394,6 @@ class WeatherRAMDepthTrainer:
                 "Last evaluation was not finished, will do evaluation before continue training."
             )
             # self.validate()
-
         self.train_metrics.reset()
         accumulated_step = 0
 
@@ -269,13 +414,13 @@ class WeatherRAMDepthTrainer:
                     rand_num_generator = None
 
                 # >>> With gradient accumulation >>>
-                rgb = batch["rgb_norm"].to(device)
+                rgb_image = batch["rgb_norm"].to(device)
                 depth_gt_for_latent = batch[self.gt_depth_type].to(device)
-                batch_size = rgb.shape[0]
+                batch_size = rgb_image.shape[0]
 
                 with torch.no_grad():
                     # Encode image
-                    rgb_latent = self.encode_rgb(rgb)  # [B, 4, h, w]
+                    rgb_latent = self.encode_rgb(rgb_image)  # [B, 4, h, w]
                     # Encode GT depth
                     gt_target_latent = self.encode_depth(
                         depth_gt_for_latent)  # [B, 4, h, w]
@@ -320,15 +465,18 @@ class WeatherRAMDepthTrainer:
                 )  # [B, 77, 1024]
 
                 # Concat rgb and target latents
-                cat_latents = torch.cat(
-                    [rgb_latent, noisy_latents], dim=1
-                )  # [B, 8, h, w]
-                cat_latents = cat_latents.float()
-
+                image_inputs = {
+                    'rgb_image': rgb_image.float(), 
+                    'rgb_latent': rgb_latent.float(), 
+                    'noisy_latent': noisy_latents.float(),
+                  }  # [B, 8, h, w]
                 # Predict the noise residual
+                latent_r = self.model.adapter(image_inputs['rgb_image'], image_inputs['rgb_latent'])
+                # Concat to 8 channels [B, 8, h, w]
+                samples = torch.cat((latent_r, image_inputs['noisy_latent']), dim=1)
                 model_pred = self.model.unet(
-                    cat_latents, timesteps, text_embed
-                ).sample  # [B, 4, h, w]
+                    samples, timesteps, text_embed
+                ).sample  # Output: [B, 4, h, w]
                 
                 if torch.isnan(model_pred).any():
                     logging.warning("model_pred contains NaN.")

@@ -28,6 +28,7 @@
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
 
+from sqlite3 import adapters
 import sys
 import os
 sys.path.insert(0, os.path.abspath(
@@ -66,6 +67,7 @@ from src.util.logging_util import (
     tb_logger,
 )
 from src.util.slurm_util import get_local_scratch_dir, is_on_slurm
+from marigold.ramit_model.ramit import RAMiTCond
 
 
 def get_args():
@@ -341,8 +343,11 @@ if "__main__" == __name__:
     sd_model_path = os.path.join(base_ckpt_dir, cfg.model.pretrained_path)
     logging.info(f'pretrained_model_path: {sd_model_path}')
     # snapshot_download("stabilityai/stable-diffusion-2", local_dir=sd_model_path)
-    model = MarigoldDepthPipeline.from_pretrained(
-        sd_model_path, **_pipeline_kwargs
+    adapter = RAMiTCond()
+    pipe = MarigoldDepthPipeline.from_pretrained(
+        sd_model_path, 
+        adapter=adapter,
+        **_pipeline_kwargs
     )
 
     # -------------------- Trainer --------------------
@@ -357,7 +362,7 @@ if "__main__" == __name__:
     logging.debug(f"Trainer: {trainer_cls}")
     trainer = trainer_cls(
         cfg=cfg,
-        model=model,
+        model=pipe,
         train_dataloader=train_loader,
         device=device,
         out_dir_ckpt=out_dir_ckpt,
