@@ -41,16 +41,16 @@ def save_xy_diff_mosaic(
     x: torch.Tensor,
     y: torch.Tensor,
     out_path: str = "xy_diff_mosaic.png",
-    cmap_xy: str = "viridis",
-    cmap_diff: str = "magma",
+    cmap_xy: str = 'plasma',
+    cmap_diff: str = 'YlOrRd',
     same_scale: bool = True,
     diff_clip_percentile: float = 99.5,
 ):
     """
-    将 x, y, |x-y| 按 3×4 网格无缝拼接为一张图并保存。
-    x, y: [4, H, W]（第一维为通道数=4）
-    same_scale: True 时，x 行共享一个色阶、y 行共享一个色阶；diff 行单独共享一个色阶
-    diff_clip_percentile: 对 diff 行按分位数裁剪上限（增强可视化），None 表示不用裁剪
+        将 x, y, |x-y| 按 3 x 4 网格无缝拼接为一张图并保存。
+        x, y: [4, H, W] with channel as 4
+        same_scale: True 时，x 行共享一个色阶、y 行共享一个色阶；diff 行单独共享一个色阶
+        diff_clip_percentile: 对 diff 行按分位数裁剪上限（增强可视化），None 表示不用裁剪
     """
     assert x.shape == y.shape and x.dim() == 3, "Expect x,y with shape [C,H,W]."
     C, H, W = x.shape
@@ -98,6 +98,11 @@ def save_xy_diff_mosaic(
     Image.fromarray(canvas).save(out_path)
     print(f"Saved mosaic to: {out_path}  | size: {canvas.shape[1]}x{canvas.shape[0]}")
 
+
+def save_grid(image_sequence):
+    """
+       image_sequence: list, with each (4, H, W), total length (domains) = N 
+    """
 
 class RAMiTLatentTrainer:
     def __init__(
@@ -271,22 +276,29 @@ class RAMiTLatentTrainer:
 
     def show_latent_difference(self):
         logging.info("Show the difference between sunny and adverse weather latent.")
-        device = self.device
         logging.info(f"Length of loader {len(self.visualize_dataset) // 7}")
-
         len_sunny = len(self.visualize_dataset) // 7
+        max_vis_results = 1
+        output_path = "output/latent_vis"
+        os.makedirs(output_path, exist_ok=True)
         vis_count = 0
+        dict_domain = {0: 'sunny', 1: 'rain', 2: 'raingan', 3: 'fog75m', 4: 'fog150m', 5: 'snow', 6: 'snowgan'}
+       
+        for domain in range(1, 7):
+            for step in range(len_sunny * domain, len_sunny * 7):
+                data_ = self.visualize_dataset[step]
+                rgb_latent = data_["input_latent"]
+                target = data_["target_latent"]
+                save_xy_diff_mosaic(
+                    rgb_latent, 
+                    target, 
+                    out_path=os.path.join(output_path, f"{dict_domain[domain]}_{step:5d}.png")
+                )
+                
+                vis_count += 1
 
-        for step in range(len_sunny*2, len_sunny * 7):
-            data_ = self.visualize_dataset[step]
-            rgb_latent = data_["input_latent"]
-            target = data_["target_latent"]
-            save_xy_diff_mosaic(rgb_latent, target, out_path=f"output/vis_out/{step:5d}.png")
-            
-            vis_count += 1
-
-            if vis_count >= 10:
-                break
+                if vis_count >= max_vis_results:
+                    break
 
     def _train_step_callback(self):
         """Executed after every iteration"""

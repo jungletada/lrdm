@@ -17,7 +17,7 @@ class WeatherOption:
         self.num_domains = 6
         
 
-class WeatherKITTLatentDataset(Dataset):
+class WeatherKITTILatentDataset(Dataset):
     def __init__(self, 
                  filename_ls_path='data_split/kitti_depth/eigen_train_files_with_gt.txt',
                  base_path='data/kitti/latent_train',
@@ -174,7 +174,7 @@ class WeatherKITTLatentDataset(Dataset):
         return sample
 
 
-class WeatherKITTILatentSceneDataset(WeatherKITTLatentDataset):
+class WeatherKITTILatentSceneDataset(WeatherKITTILatentDataset):
     def __init__(self, 
                  filename_ls_path='data_split/kitti_depth/eigen_train_files_with_gt.txt', 
                  base_path='data/kitti/latent_train', 

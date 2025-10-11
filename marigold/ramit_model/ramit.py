@@ -1,7 +1,8 @@
-# RAMiT (Reciprocal Attention Mixing Transformer)
+import logging
 import os
 import sys
 import math
+import json
 from multiprocessing import process
 from tokenize import group
 import torch
@@ -12,66 +13,13 @@ from torchvision.transforms import functional as TF
 from einops import rearrange
 from timm.models import register_notrace_function
 from timm.layers import trunc_normal_, DropPath
-
+from safetensors.torch import save_file, load_file
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from ramit_model.common.mean_std import mean_std
+
 # from util.etc_utils import denormalize # ramit_model.
 # from .common.mean_std import mean_std
 
-def make_model(args, opts, pe):
-    model = RAMiT(target_mode=args.target_mode,
-                  img_norm=args.img_norm,
-                  in_chans=opts['in_chans'],
-                  dim = opts['dim'],
-                  depths = opts['depths'],
-                  num_heads = opts['num_heads'],
-                  head_dim = opts['head_dim'],
-                  chsa_head_ratio = opts['chsa_head_ratio'],
-                  window_size = opts['window_size'],
-                  hidden_ratio = opts['hidden_ratio'],
-                  qkv_bias = opts['qkv_bias'],
-                  mv_ver = opts['mv_ver'],
-                  exp_factor=opts['exp_factor'],
-                  expand_groups=opts['expand_groups'],
-                  act_layer = opts['act_layer'],
-                  norm_layer = opts['norm_layer'],
-                  tail_mv = opts['tail_mv'],
-                  attn_drop = opts['attn_drop'],
-                  proj_drop = opts['proj_drop'],
-                  drop_path = opts['drop_path'],
-                  helper = opts['helper'],
-                  mv_act = opts['mv_act']
-                 )
-    num_params = sum([p.numel() for _, p in model.named_parameters()])
-    print(format(num_params, ','))
-    return model
-
-def downsample2d(x: torch.Tensor, factor: int, mode: str = "area") -> torch.Tensor:
-    """
-    Downsample 2D maps by an integer factor using interpolation.
-    - Supports [B, H, W] or [B, C, H, W].
-    - For factor=1 returns x unchanged.
-    """
-    if factor == 1:
-        return x
-
-    added_channel = False
-    if x.dim() == 3:         # [B, H, W] -> [B, 1, H, W]
-        x = x.unsqueeze(1)
-        added_channel = True
-
-    H, W = x.shape[-2:]
-    new_size = (max(1, H // factor), max(1, W // factor))
-
-    if mode in ("bilinear", "bicubic"):
-        x = F.interpolate(x, size=new_size, mode=mode, align_corners=False)
-    else:
-        # 'area' or 'nearest' do not use align_corners
-        x = F.interpolate(x, size=new_size, mode=mode)
-
-    if added_channel:
-        x = x.squeeze(1)     # back to [B, H, W]
-    return x
 
 def upsample2d(x: torch.Tensor, factor: int, mode: str = 'bilinear') -> torch.Tensor:
     return F.interpolate(
@@ -556,7 +504,16 @@ class HRAMi(nn.Module):
             x = torch.cat(attn_list, dim=1)
             x = self.mobivari(x)
         return x
-  
+
+class DepthWiseConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, bias=False):
+        super(DepthWiseConv, self).__init__()
+        self.dwconv = nn.Conv2d(in_channels, out_channels, kernel_size, 
+                                stride, padding=kernel_size//2, bias=bias, groups=in_channels)
+        self.pwconv = nn.Conv2d(out_channels, out_channels, 1, 1, 0, bias=bias)
+    def forward(self, x):
+        return self.pwconv(self.dwconv(x))
+
 class Reconstruction(nn.Module):
     def __init__(self, out_chans, dim, kernel_size=3, stride=1, num_mv=2, mv_ver=1, mv_act=nn.LeakyReLU, exp_factor=1.2, expand_groups=4):
         super(Reconstruction, self).__init__()
@@ -588,20 +545,17 @@ class Reconstruction(nn.Module):
 class SEGate2d(nn.Module):
     """
         x: [B, C, H, W]  ->  g: [B, d, H, W]  (sigmoid门控)
-        做法：Conv1x1将C->d，然后对z做SE(channel attention)，得到通道权重w，并与z逐点相乘再sigmoid作为门控g。
+        做法：Conv1x1将C->d，然后对z做SE(channel attention)，得到通道权重w，并与z逐点相乘作为门控g。
     """
-    def __init__(self, in_channels: int, out_channels: int, reduction: int = 16):
+    def __init__(self, in_channels: int, out_channels: int, hidden: int = 4):
         super().__init__()
         self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
 
         # Squeeze: GAP -> [B, d, 1, 1]
-        # Excitation: 两层FC（用1x1卷积实现），d -> d//r -> d
-        hidden = max(out_channels // reduction, 1)
+        # Excitation: 两层FC(用1x1卷积实现)
         self.fc1 = nn.Conv2d(out_channels, hidden, kernel_size=1)
         self.fc2 = nn.Conv2d(hidden, out_channels, kernel_size=1)
-
-        self.act = nn.ReLU(inplace=True)
-        self.sig = nn.Sigmoid()
+        self.act = nn.SiLU()
 
         # 可选：初始化更稳定（非必需）
         nn.init.kaiming_normal_(self.proj.weight, nonlinearity="relu")
@@ -611,76 +565,68 @@ class SEGate2d(nn.Module):
     def forward(self, x):
         # 1) 通道映射 C->d
         z = self.proj(x)                          # [B, d, H, W]
-
         # 2) Squeeze（全局平均池化）得到通道描述
         s = F.adaptive_avg_pool2d(z, 1)           # [B, d, 1, 1]
-
         # 3) Excitation（两层MLP）得到通道权重
         w = self.fc2(self.act(self.fc1(s)))       # [B, d, 1, 1]
-        w = self.sig(w)                           # [B, d, 1, 1] in (0,1)
-
-        # 4) 生成门控图（带空间信息）：逐点调制并Sigmoid
-        g = self.sig(z * w)                       # [B, d, H, W] in (0,1)
+        # 4) 生成门控图（带空间信息）：逐点调制
+        g = z * w     # [B, d, H, W] 
         return g
 
 class CBAMGate2d(nn.Module):
     """
-    x: [B, C, H, W] -> g: [B, d, H, W]
-    先做SE样式的通道门控，再做CBAM样式的空间门控（avg/max通道池化 -> 7x7 conv）。
+        x: [B, C, H, W] -> g: [B, d, H, W]
+        先做SE样式的通道门控, 再做CBAM样式的空间门控（avg/max通道池化 -> 7x7 conv）。
     """
-    def __init__(self, in_channels: int, out_channels: int, reduction: int = 16, spatial_kernel: int = 7):
+    def __init__(self, in_channels: int, out_channels: int, reduction: int = 16, spatial_kernel: int = 3):
         super().__init__()
         self.channel_gate = SEGate2d(in_channels, out_channels, reduction)
-
-        # 空间门控：按照CBAM，用通道平均与通道最大池化，拼接后卷积生成 [B,1,H,W]
+        # 空间门控：按照CBAM，用通道平均与通道最大池化，拼接后卷积生成 [B, 1, H, W]
         padding = spatial_kernel // 2
         self.spatial_conv = nn.Conv2d(2, 1, kernel_size=spatial_kernel, padding=padding, bias=False)
         nn.init.kaiming_normal_(self.spatial_conv.weight, nonlinearity="relu")
-        self.sig = nn.Sigmoid()
 
     def forward(self, x):
         # 先得到通道门控后的中间特征（仍作为门控图的基础）
-        g_c = self.channel_gate(x)                # [B, d, H, W]
-
+        g_c = self.channel_gate(x)  # [B, d, H, W]
         # 依据CBAM思路生成空间注意力
-        avg_pool = torch.mean(g_c, dim=1, keepdim=True)             # [B,1,H,W]
-        max_pool, _ = torch.max(g_c, dim=1, keepdim=True)           # [B,1,H,W]
-        s_map = self.sig(self.spatial_conv(torch.cat([avg_pool, max_pool], dim=1)))  # [B,1,H,W]
-
+        avg_pool = torch.mean(g_c, dim=1, keepdim=True)    # [B, 1, H, W]
+        max_pool, _ = torch.max(g_c, dim=1, keepdim=True)  # [B, 1, H, W]
+        s_map = self.spatial_conv(torch.cat([avg_pool, max_pool], dim=1))  # [B, 1, H, W]
         # 将空间门控广播到 d 个通道
-        g = g_c * s_map                                             # [B, d, H, W]
-        
+        g = g_c * s_map  # [B, d, H, W]
         return g
 
 class CondConvResidual(nn.Module):
-    def __init__(self, lnt_dim, channel, K=3):
+    def __init__(self, lnt_dim, dim, K=6):
         """
             lnt_dim: latent dimension
             channel: CondConvResidual module dimension 
             K: Number of experts
         """
         super().__init__()
-        # K depthwise experts + 1×1 融合
+        # K depthwise experts + 1×1 Conv
         self.depthwise_convs = nn.ModuleList([
-                nn.Conv2d(channel, channel, 3, padding=1, groups=channel, bias=False) 
+                nn.Conv2d(dim, dim, 3, padding=1, groups=dim, bias=False) 
                     for _ in range(K)])
-        self.point_conv = nn.Conv2d(channel, lnt_dim, 1, bias=False)
+        self.point_conv = nn.Conv2d(dim, lnt_dim, 1, bias=False)
         self.router = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1), 
-            nn.Conv2d(channel, K, 1))
+            CBAMGate2d(dim, dim),
+            nn.Conv2d(dim, K, 1),
+        )
         
     def forward(self, x_img, x_lnt):
-        a = torch.softmax(self.router(x_img).flatten(1), dim=1)  # [B, K]
+        expert_weight = torch.softmax(self.router(x_img), dim=1)  # [B, K, H, W]
         dTs = torch.stack([self.depthwise_convs[k](x_lnt) 
-                            for k in range(len(self.depthwise_convs))], dim=1)  # [B,K,d,H,W]
-        mix = (a[:, :, None, None, None] * dTs).sum(dim=1)        # [B,d,H,W]
+                            for k in range(len(self.depthwise_convs))], dim=1)  # [B, K, d, H, W]
+        mix = (expert_weight.unsqueeze(2) * dTs).sum(dim=1)        # [B, K, d, H, W] -> [B, d, H, W]
         return self.point_conv(mix)
 
-class RAMiTModule(nn.Module):
+class RAMiTCond(nn.Module):
     def __init__(self, 
-                 in_chans=4, 
+                 input_dim=4, 
                  dim=24, 
-                 depths=(6,4,4,6), 
+                 depths=(2,4,4,2),
                  num_heads=(4,4,4,4), 
                  head_dim=None, 
                  chsa_head_ratio=0.25,
@@ -700,160 +646,10 @@ class RAMiTModule(nn.Module):
                  drop_path=0.0, 
                  helper=True, 
                  mv_act=nn.LeakyReLU):
-        super(RAMiTModule, self).__init__()
+        super().__init__() 
         
         self.unit = 2 ** (len(depths)-2) * window_size
-        self.in_chans = in_chans
-        self.dim = dim
-        self.depths = depths
-        self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.window_size = window_size
-        self.hidden_ratio = hidden_ratio
-        self.qkv_bias = qkv_bias
-        self.act_layer = act_layer
-        norm_layer = ReshapeLayerNorm if norm_layer == 'ReshapeLayerNorm' else norm_layer
-        self.norm_layer = norm_layer = ReshapeLayerNorm if norm_layer == 'ReshapeLayerNorm' else norm_layer
-        self.tail_mv = tail_mv
-        
-        self.scale = 1
-        self.mean, self.std = mean_std(self.scale, target_mode)
-        self.target_mode = target_mode
-        self.img_norm = img_norm
-        self.shallow = ShallowModule(in_chans, dim, 3, 1)
-        self.stage1 = EncoderStage(depths[0], dim, num_heads[0], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
-                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
-        self.stage2 = EncoderStage(depths[1], dim, num_heads[1], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
-                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
-        self.stage3 = EncoderStage(depths[2], dim, num_heads[2], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
-                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
-        self.bottleneck = Bottleneck(dim, len(depths)-1, act_layer, norm_layer, mv_ver, mv_act)
-        self.stage4 = EncoderStage(depths[3], dim, num_heads[3], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
-                                   hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
-        self.attn_mix = HRAMi(dim, 3, 1, mv_ver, mv_act)
-        self.to_target = Reconstruction(in_chans, dim, 3, 1, tail_mv, mv_ver, mv_act, exp_factor, expand_groups)
-        self.scale_residual = CBAMGate2d(in_channels=dim, out_channels=in_chans)
-
-        self.apply(self._init_weights)
-
-    def forward_size_norm(self, x):
-        _, _, h, w = x.size()
-        padh = self.unit-(h % self.unit) if h % self.unit != 0 else 0
-        padw = self.unit-(w % self.unit) if w % self.unit != 0 else 0
-        x = TF.pad(x, (0, 0, padw, padh))
-
-        return x
-
-    def forward(self, rgb_latent):
-        """
-        Forward pass of the fusion module.
-        Inputs:
-          rgb_latent: tensor of shape [B, 4, H, W]
-          split as (rgb_latent, depth_latent): tensors of shape [B, 4, H, W].
-        Output:
-          out: tensor of shape [B, 320, H, W] combining all.
-        """
-        shallow = self.shallow(rgb_latent)
-        
-        o1, attn1 = self.stage1(shallow) # [B, C, H//8, W//8]
-        o2, attn2 = self.stage2(o1)         # [B, C, H//8, W//8]
-        o3, attn3 = self.stage3(o2)         # [B, C, H//8, W//8]
-        
-        ob = self.bottleneck([shallow, o1, o2, o3])   # [B, C, H//8, W//8]
-        
-        o4, attn4 = self.stage4(ob)             # [B, C, H//8, W//8]
-        mix = self.attn_mix([attn1, attn2, attn3, attn4]) # [B, C, H//8, W//8]
-        o4 = o4 * mix   # [B, C, H, W]
-        o5 = o4 + shallow
-        rs_latent = self.to_target(o5)    # global skip connection
-        gate = self.scale_residual(o5)    # [B, 4, H//8, W//8]
-        
-        rs_latent = gate * rs_latent + rgb_latent
-        
-        return rs_latent
-    
-    def _init_weights(self, m):
-        # Swin V2 manner
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-        # Additionally, if this is the to_target layer, initialize its weights and bias to zero
-        if hasattr(self, 'to_target') and m is self.to_target:
-            if hasattr(m, 'weight') and m.weight is not None:
-                nn.init.constant_(m.weight, 0)
-            if hasattr(m, 'bias') and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-    
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        nwd = set()
-        for n, _ in self.named_parameters():
-            if 'relative_position_bias_table' in n:
-                nwd.add(n)
-        return nwd
-    
-class RAMiT(nn.Module):
-    def __init__(self, **kwargs):
-        super(RAMiT, self).__init__()
-        self.ramit_module = RAMiTCond(**kwargs)
-        self.new_conv_in = nn.Conv2d(12, 320, kernel_size=3, padding=1)
-
-    def forward(self, sample):
-        """
-        Forward pass of the fusion module.
-        Inputs:
-          sample: tensor of shape [B, 8, H, W]
-          split as (rgb_latent, depth_latent): tensors of shape [B, 4, H, W].
-        Output:
-          out: tensor of shape [B, 320, H, W] combining all.
-        """
-        revised_latent = self.ramit_module(sample['rgb_image'], sample['rgb_latent'])
-        out = torch.cat((sample['rgb_latent'], revised_latent, sample['noisy_latent']), dim=1) # [B, 12, H, W]
-        out = self.new_conv_in(out)     # [B, 320, H, W]
-        
-        return out
-    
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        nwd = set()
-        for n, _ in self.named_parameters():
-            if 'relative_position_bias_table' in n:
-                nwd.add(n)
-        return nwd
-
-class RAMiTCond(RAMiTModule):
-    def __init__(self, 
-                 in_chans=4, 
-                 dim=24, 
-                 depths=(6,4,4,6),
-                 num_heads=(4,4,4,4), 
-                 head_dim=None, 
-                 chsa_head_ratio=0.25,
-                 window_size=4, 
-                 hidden_ratio=2.0, 
-                 qkv_bias=True, 
-                 mv_ver=1, 
-                 exp_factor=1.2, 
-                 expand_groups=4,
-                 act_layer=nn.GELU, 
-                 norm_layer=ReshapeLayerNorm, 
-                 tail_mv=2, 
-                 target_mode='light_dr', 
-                 img_norm=True,
-                 attn_drop=0.0, 
-                 proj_drop=0.0, 
-                 drop_path=0.0, 
-                 helper=True, 
-                 mv_act=nn.LeakyReLU):
-        super(RAMiTCond, self).__init__()
-        
-        self.unit = 2 ** (len(depths)-2) * window_size
-        self.in_chans = in_chans
+        self.in_channels = input_dim
         self.dim = dim
         self.depths = depths
         self.num_heads = num_heads
@@ -888,8 +684,13 @@ class RAMiTCond(RAMiTModule):
         self.stage4 = EncoderStage(depths[3], dim, num_heads[3], chsa_head_ratio, window_size, head_dim, qkv_bias, mv_ver, 
                                    hidden_ratio, act_layer, norm_layer, attn_drop, proj_drop, drop_path, helper, mv_act)
         self.attn_mix = HRAMi(dim, 3, 1, mv_ver, mv_act)
-        self.residual = CondConvResidual(lnt_dim=in_chans, channel=dim)
-        # self.scale_residual = CBAMGate2d(in_channels=dim, out_channels=in_chans)
+
+        # For ablation study
+        self.residual = CondConvResidual(lnt_dim=input_dim, dim=dim)
+        
+        self.register_buffer("_dtype_helper",
+                             torch.zeros((), dtype=torch.float32, device="cpu"),
+                             persistent=False)
         self.apply(self._init_weights)
 
     def forward_size_norm(self, x):
@@ -904,7 +705,47 @@ class RAMiTCond(RAMiTModule):
     def dtype(self):
         p = next(self.parameters(), None)
         return p.dtype if p is not None else torch.float32
-    
+
+    def save_pretrained(self, save_directory: str, safe_serialization: bool = True):
+        os.makedirs(save_directory, exist_ok=True)
+        # 1) save config
+        cfg = {
+            "input_dim": self.in_channels,
+            "depths": self.depths,
+            "dim": self.dim,
+            "head_dim": self.head_dim,
+            "window_size": self.window_size,
+            "_class_name": self.__class__.__name__,
+        }
+        with open(os.path.join(save_directory, "config.json"), "w") as f:
+            json.dump(cfg, f, indent=2)
+        # 2) save weights
+        state = self.state_dict()
+        if safe_serialization:
+            save_file(state, os.path.join(save_directory, "ramit_model.safetensors"))
+        else:
+            torch.save(state, os.path.join(save_directory, "ramit_model.bin"))
+
+    @classmethod
+    def from_pretrained(cls, load_directory: str, subfolder=None, map_location=None, torch_dtype=None):
+        if subfolder is not None:
+            load_directory = os.path.join(load_directory, subfolder)
+        with open(os.path.join(load_directory, "config.json"), "r") as f:
+            cfg = json.load(f)
+        model = cls(**{k: cfg[k] for k in ["input_dim", "depths", "dim", "head_dim", "window_size"]})
+        # load weights
+        wt_path_safe = os.path.join(load_directory, "ramit_model.safetensors")
+        wt_path_pt   = os.path.join(load_directory, "ramit_model.bin")
+        if os.path.exists(wt_path_safe):
+            state = load_file(wt_path_safe, device=map_location or "cpu")
+        else:
+            state = torch.load(wt_path_pt, map_location=map_location or "cpu")
+        model.load_state_dict(state, strict=True)
+        # to(dtype)
+        if torch_dtype is not None:
+            model.to(dtype=torch_dtype)
+        return model
+
     def forward(self, rgb_image, rgb_latent):
         """
         Forward pass of the fusion module.
@@ -916,7 +757,7 @@ class RAMiTCond(RAMiTModule):
         """
         x_img = self.shallow_image(rgb_image)     # [B, C, H//8, W//8]
         x_lnt = self.shallow_latent(rgb_latent)   # [B, C, H//8, W//8]
-        # (f"Image: {x_img.shape}, Latent: {x_lnt.shape}")
+
         o0 = torch.cat((x_img, x_lnt), dim=1)
         o0 = self.reduce_conv(o0)
 
@@ -957,12 +798,22 @@ class RAMiTCond(RAMiTModule):
                 nn.init.constant_(m.weight, 0)
             if hasattr(m, 'bias') and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        
-        # if hasattr(self, 'residual') and m is self.residual:
-        #     if hasattr(m.point_conv, 'weight') and m.point_conv.weight is not None:
-        #         nn.init.constant_(m.point_conv.weight, 0)
-        #     if hasattr(m.point_conv, 'bias') and m.point_conv.bias is not None:
-        #         nn.init.constant_(m.point_conv.bias, 0)
+
+        # important for residual
+        if hasattr(self, 'residual') and m is self.residual:
+            if isinstance(self.residual, nn.Conv2d):
+                logging.info(f'Zero initialize the 1x1 convolution.')
+                if hasattr(m, 'weight') and m.weight is not None:
+                    nn.init.constant_(m.weight, 0)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            else:
+                if hasattr(m, 'point_conv'):
+                    logging.info(f'Zero initialize point convolution in CondResidual.')
+                    if hasattr(m.point_conv, 'weight') and m.point_conv.weight is not None:
+                        nn.init.constant_(m.point_conv.weight, 0)
+                    if hasattr(m.point_conv, 'bias') and m.point_conv.bias is not None:
+                        nn.init.constant_(m.point_conv.bias, 0)
     
     @torch.jit.ignore
     def no_weight_decay(self):

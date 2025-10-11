@@ -30,6 +30,7 @@
 import os
 import shutil
 import logging
+from tkinter import NO
 from PIL import Image
 from datetime import datetime
 from tqdm import tqdm
@@ -55,7 +56,6 @@ from src.util.lr_scheduler import IterExponential
 from src.util.metric import MetricTracker
 from src.util.multi_res_noise import multi_res_noise_like
 from src.util.seeding import generate_seed_sequence
-from marigold.ramit_model.ramit import RAMiT
 from marigold.marigold_depth_pipeline import MarigoldDepthPipeline, MarigoldDepthOutput
 
 # Import safetensors for loading .safetensors files
@@ -148,7 +148,6 @@ class WeatherRAMDepthTrainer:
         self.model.scheduler = DDIMScheduler.from_config(
             self.training_noise_scheduler.config,
         )
-
         # Eval metrics
         self.metric_funcs = [getattr(metric, _met) for _met in cfg.eval.eval_metrics]
 
@@ -193,7 +192,6 @@ class WeatherRAMDepthTrainer:
         self.global_seed_sequence: List = []  # consistent global seed sequence, used to seed random generator, to ensure consistency when resuming
 
     def _replace_unet_conv_in(self):
-        
         if self.model.unet.config["in_channels"] == 4:
             # replace the first layer to accept 8 in_channels
             _weight = self.model.unet.conv_in.weight.clone()  # [320, 4, 3, 3]
@@ -236,28 +234,6 @@ class WeatherRAMDepthTrainer:
         #     logging.info("Unet config is updated, in_channels from 8 to 12.")
             
         return
-
-    def replace_convin_with_ramit(self):
-        # _weight = self.model.unet.conv_in.weight.clone()  # [320, 8, 3, 3]
-        # _bias = self.model.unet.conv_in.bias.clone()  # [320]
-
-        # shape check
-        # out_c, in_c, kh, kw = _weight.shape
-        # if not (out_c == 320 and in_c == 8 and kh == 3 and kw == 3):
-        #     raise ValueError(f"Expected conv_in weight shape [320, 8, 3, 3], got {_weight.shape}")
-        # half = in_c // 2  # 4
-        # w1 = _weight[:, :half].contiguous() * 0.9  # [320, 4, 3, 3]
-        # w2 = _weight[:, half:].contiguous() * 0.1  # [320, 4, 3, 3]
-        # w0 = w1.clone()                       # [320, 4, 3, 3]
-        
-        #expanded_weight = torch.cat([w1, w0, w2], dim=1).contiguous()  # [320, 12, 3, 3]
-
-        self.model.unet.conv_in = RAMiT()
-        # ramit_checkpoint = torch.load(self.cfg.ramit_path, map_location='cpu')
-        # self.model.unet.conv_in.ramit_module.load_state_dict(ramit_checkpoint)
-        # self.model.unet.conv_in.new_conv_in.weight = Parameter(expanded_weight)
-        logging.info("Unet conv_in layer is replaced with our RAMiT")
-        return
     
     @staticmethod
     def _set_requires_grad(module, flag: bool):
@@ -275,7 +251,9 @@ class WeatherRAMDepthTrainer:
         ver = self.cfg.trainer.training_version
         # 1) freeze all unet parameters
         self._set_requires_grad(self.model.unet, False)
-        self._set_requires_grad(self.model.adapter, True)
+
+        if hasattr(self.model, 'adapter'):
+            self._set_requires_grad(self.model.adapter, True)
         # 2) 常见子模块句柄（diffusers 的 UNet2DConditionModel 典型结构）
         #    这些属性是否存在与具体版本有关，均做了 hasattr 防护
         parts = dict([
@@ -292,20 +270,22 @@ class WeatherRAMDepthTrainer:
 
         # 3) training version
         if ver == "full":
-            self._set_requires_grad(self.model.unet, True)
+            logging.info("Training full unet")
+            self.model.unet.requires_grad_(True)
             logging.info(f"Using full unet parameters training.")
             
         elif ver == "encoder_only":
-            # 编码端 + 中间块参与训练；解码端与输出层冻结
+            logging.info("Training encoder only")
             for k in ["time_proj", "time_embedding", "class_embedding",
                     "conv_in", "down_blocks", "mid_block"]:
+                logging.info(f"{k}, \n {parts.get(k)}")
                 self._set_requires_grad(parts.get(k), True)
-            # 其余保持冻结（up_blocks / conv_norm_out / conv_out）
+            # Others remain freezed（up_blocks / conv_norm_out / conv_out）
             logging.info(f"Using unet encoder parameters training.")
             
-        elif ver == "ramit_only":
+        elif ver == "adapter_only":
             # 仅训练输入侧的适配/恢复模块。若你的 RAMiT 在 UNet 之外，请按需单独启用。
-            self._set_requires_grad(parts.get("conv_in"), True)
+            # self._set_requires_grad(parts.get("conv_in"), True)
             logging.info(f"Using restoration module parameters training.")
         else:
             raise NotImplementedError(f"Unknown training_version: {ver}")
@@ -319,7 +299,6 @@ class WeatherRAMDepthTrainer:
         Hyperparameters read from self.cfg (if present)
         """
         base_lr = self.cfg.lr
-        wd = self.cfg.weight_decay
         lr_mult = self.cfg.head_lr_mult
         version = self.cfg.trainer.training_version
 
@@ -330,62 +309,52 @@ class WeatherRAMDepthTrainer:
             lname = name.lower()
             return any(k in lname for k in ["bias", "norm", "bn", "ln", "gn", "embedding"])
 
-        decay, no_decay, high_lr = [], [], []
+        base_unet, high_lr = [], []
 
-        # UNet 参数
-        for name, p in self.model.unet.named_parameters():
+        # UNet parameters
+        for p in self.model.unet.parameters():
             if not p.requires_grad:
                 continue
-            if is_no_decay(name, p):
-                no_decay.append(p)
             else:
-                decay.append(p)
-            # 高学习率的子模块（在部分微调时更易收敛）
-            if version in ("encoder_only", "ramit_only"):
-                if name.startswith(("conv_in", "time_proj", "time_embedding", "class_embedding")):
-                    high_lr.append(p)
+                base_unet.append(p)
+            # # 高学习率的子模块（在部分微调时更易收敛）
+            # if version in ("encoder_only", "ramit_only"):
+            #     if name.startswith(("conv_in", "time_proj", "time_embedding", "class_embedding")):
+            #         high_lr.append(p)
 
-        # 外部 RAMiT（如果集成为单独模块）
-        if hasattr(self.model, "adapter"):
-            print("hasattr(adapter)")
-            for name, p in self.model.adapter.named_parameters():
+        if hasattr(self.model, "adapter") and self.model.adapter is not None:
+            for p in self.model.adapter.parameters():
                 if p.requires_grad:
-                    # 视作高学习率组；是否衰减按形状再判断
-                    if is_no_decay(name, p):
-                        high_lr.append(p)  # 统一放高 LR 组，这里无需再分 decay/no_decay
-                    else:
-                        high_lr.append(p)
+                    high_lr.append(p) 
+              
 
-        # 去重，避免同一参数被放入多个组
-        def _uniq(params):
-            return list({id(p): p for p in params}.values())
+        # # 去重，避免同一参数被放入多个组
+        # def _uniq(params):
+        #     return list({id(p): p for p in params}.values())
 
-        high_lr = _uniq(high_lr)
-        decay   = _uniq(decay)
-        no_decay= _uniq(no_decay)
+        # high_lr = _uniq(high_lr)
+        # decay   = _uniq(decay)
+        # no_decay= _uniq(no_decay)
 
-        high_ids = {id(p) for p in high_lr}
-        decay    = [p for p in decay    if id(p) not in high_ids]
-        no_decay = [p for p in no_decay if id(p) not in high_ids]
+        # high_ids = {id(p) for p in high_lr}
+        # decay    = [p for p in decay    if id(p) not in high_ids]
+        # no_decay = [p for p in no_decay if id(p) not in high_ids]
 
         # ---------- 构建 param groups ----------
         param_groups = []
-        if decay:
-            param_groups.append({"params": decay, "weight_decay": wd, "lr": base_lr})
-        if no_decay:
-            param_groups.append({"params": no_decay, "weight_decay": 0.0, "lr": base_lr})
+        if base_unet:
+            param_groups.append({"params": base_unet, "lr": base_lr})
         if high_lr:
-            param_groups.append({"params": high_lr, "weight_decay": wd, "lr": base_lr * lr_mult})
-
+            param_groups.append({"params": high_lr, "lr": base_lr * lr_mult})
 
         self.optimizer = torch.optim.Adam(
             param_groups,
             lr=base_lr,
         )
 
-    def train(self, t_end=None):
-        logging.info("Start training")
-
+    def train(self, t_end=None, phase="train"):
+        logging.info("Start training with phase: %s", phase)
+        train_loader = self.train_loader if phase == "train" else self.warmup_loader
         device = self.device
         self.model.to(device)
 
@@ -402,9 +371,7 @@ class WeatherRAMDepthTrainer:
             logging.debug(f"epoch: {self.epoch}")
 
             # Skip previous batches when resume
-            for batch in skip_first_batches(self.train_loader, self.n_batch_in_epoch):
-                self.model.unet.train()
-
+            for batch in skip_first_batches(train_loader, self.n_batch_in_epoch):
                 # globally consistent random generators
                 if self.seed is not None:
                     local_seed = self._get_next_seed()
@@ -471,9 +438,12 @@ class WeatherRAMDepthTrainer:
                     'noisy_latent': noisy_latents.float(),
                   }  # [B, 8, h, w]
                 # Predict the noise residual
-                latent_r = self.model.adapter(image_inputs['rgb_image'], image_inputs['rgb_latent'])
-                # Concat to 8 channels [B, 8, h, w]
-                samples = torch.cat((latent_r, image_inputs['noisy_latent']), dim=1)
+                if hasattr(self.model, 'adapter') and self.model.adapter is not None:
+                    latent_r = self.model.adapter(image_inputs['rgb_image'], image_inputs['rgb_latent'])
+                    # Concat to 8 channels [B, 8, h, w]
+                    samples = torch.cat((latent_r, image_inputs['noisy_latent']), dim=1)
+                else:
+                    samples = torch.cat((image_inputs['rgb_latent'], image_inputs['noisy_latent']), dim=1)
                 model_pred = self.model.unet(
                     samples, timesteps, text_embed
                 ).sample  # Output: [B, 4, h, w]
@@ -494,9 +464,7 @@ class WeatherRAMDepthTrainer:
                     raise ValueError(f"Unknown prediction type {self.prediction_type}")
 
                 latent_loss = self.loss(model_pred.float(), target.float())
-
                 loss = latent_loss.mean()
-
                 self.train_metrics.update("loss", loss.item())
 
                 loss = loss / self.gradient_accumulation_steps
@@ -570,7 +538,7 @@ class WeatherRAMDepthTrainer:
         rgb_aug = rgb + noise
         return rgb_aug
     
-    def consistency_train(self, t_end=None):
+    def warmup_train(self, t_end=None):
         logging.info("Start training")
 
         device = self.device
@@ -591,8 +559,6 @@ class WeatherRAMDepthTrainer:
 
             # Skip previous batches when resume
             for batch in skip_first_batches(self.train_loader, self.n_batch_in_epoch):
-                self.model.unet.train()
-
                 # globally consistent random generators
                 if self.seed is not None:
                     local_seed = self._get_next_seed()
@@ -1036,6 +1002,12 @@ class WeatherRAMDepthTrainer:
         unet_path = os.path.join(ckpt_dir, "unet")
         self.model.unet.save_pretrained(unet_path, safe_serialization=True)
         logging.info(f"UNet is saved to: {unet_path}")
+        
+        # Save adapter
+        if hasattr(self.model, 'adapter') and self.model.adapter is not None:
+            adapter_path = os.path.join(ckpt_dir, "adapter")
+            self.model.adapter.save_pretrained(adapter_path, safe_serialization=True)
+            logging.info(f"Adapter is saved to: {adapter_path}")
 
         # Save scheduler
         scheduelr_path = os.path.join(ckpt_dir, "scheduler")
@@ -1071,37 +1043,45 @@ class WeatherRAMDepthTrainer:
         self, ckpt_path, load_trainer_state=True, resume_lr_scheduler=True
     ):
         logging.info(f"Loading checkpoint from: {ckpt_path}")
-        # Load UNet
-        _model_path = os.path.join(ckpt_path, "unet", "diffusion_pytorch_model.safetensors")
-        
-        # Check if safetensors file exists, otherwise try .bin file
-        if not os.path.exists(_model_path):
-            _model_path = os.path.join(ckpt_path, "unet", "diffusion_pytorch_model.bin")
-        
-        if not os.path.exists(_model_path):
-            raise FileNotFoundError(f"Model file not found at {_model_path}")
-        
-        # Load model weights based on file type
-        if _model_path.endswith('.safetensors'):
-            if not SAFETENSORS_AVAILABLE:
-                raise ImportError("safetensors library is required to load .safetensors files")
+
+        def load_ckeckpoint_dict_from_path(subfolder="unet", model_ckpt="diffusion_pytorch_model.safetensors"):
+            # Load UNet
+            _model_path = os.path.join(ckpt_path, subfolder, model_ckpt)
             
-            # Load using safetensors
-            state_dict = {}
-            with safe_open(_model_path, framework="pt", device='cpu') as f:
-                for key in f.keys():
-                    state_dict[key] = f.get_tensor(key)
-        else:
-            # Load using torch.load for .bin files
-            state_dict = torch.load(_model_path, map_location='cpu')
+            # Check if safetensors file exists, otherwise try .bin file
+            if not os.path.exists(_model_path):
+                _model_path = os.path.join(ckpt_path, subfolder, model_ckpt.replace("safetensors", "bin"))
+            
+            if not os.path.exists(_model_path):
+                raise FileNotFoundError(f"Model file not found at {_model_path}")
+            
+            # Load model weights based on file type
+            if _model_path.endswith('.safetensors'):
+                if not SAFETENSORS_AVAILABLE:
+                    raise ImportError("safetensors library is required to load .safetensors files")
+                
+                # Load using safetensors
+                state_dict = {}
+                with safe_open(_model_path, framework="pt", device='cpu') as f:
+                    for key in f.keys():
+                        state_dict[key] = f.get_tensor(key)
+            else:
+                # Load using torch.load for .bin files
+                state_dict = torch.load(_model_path, weights_only=True, map_location='cpu')
+
+            return state_dict
         
-        self.model.unet.load_state_dict(state_dict)
+        unet_state_dict = load_ckeckpoint_dict_from_path(subfolder="unet", model_ckpt="diffusion_pytorch_model.safetensors")
+        self.model.unet.load_state_dict(unet_state_dict)
         self.model.unet.to(self.device)
-        logging.info(f"UNet parameters are loaded from {_model_path}")
+
+        adapter_state_dict = load_ckeckpoint_dict_from_path(subfolder="adapter", model_ckpt="ramit_model.safetensors")
+        self.model.adapter.load_state_dict(adapter_state_dict)
+        self.model.adapter.to(self.device)
 
         # Load training states
         if load_trainer_state:
-            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"))
+            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"), weights_only=True)
             self.effective_iter = checkpoint["effective_iter"]
             self.epoch = checkpoint["epoch"]
             self.n_batch_in_epoch = checkpoint["n_batch_in_epoch"]

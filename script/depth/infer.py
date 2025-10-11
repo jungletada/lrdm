@@ -28,6 +28,7 @@
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
 import os
+from sqlite3 import adapters
 import sys
 import argparse
 import logging
@@ -41,9 +42,8 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
-
+from marigold.ramit_model.ramit import RAMiTCond
 from marigold import MarigoldDepthPipeline, MarigoldDepthOutput
-from marigold.ramit_model.ramit import RAMiT
 
 from src.dataset import (
     BaseDepthDataset,
@@ -178,19 +178,19 @@ def get_pipeline(args):
         )
         
     elif args.version == 'restore':
-        unet = UNet2DConditionModel.from_pretrained(args.base_checkpoint, subfolder="unet")
         vae = AutoencoderKL.from_pretrained(args.base_checkpoint, subfolder="vae")
         scheduler = DDIMScheduler.from_pretrained(args.base_checkpoint, subfolder="scheduler")
         text_encoder = CLIPTextModel.from_pretrained(args.base_checkpoint, subfolder="text_encoder")
         tokenizer = CLIPTokenizer.from_pretrained(args.base_checkpoint, subfolder="tokenizer")
-        
+        unet = UNet2DConditionModel.from_pretrained(args.finetune_checkpoint, subfolder="unet")
+        # adapter = RAMiTCond.from_pretrained(args.finetune_checkpoint, subfolder="adapter")
         pipeline = MarigoldDepthPipeline(
             unet=unet,
             vae=vae,
             scheduler=scheduler,
             text_encoder=text_encoder,
             tokenizer=tokenizer,
-            ramit_ckpt=args.ramit_checkpoint,
+            adapter=None,
         )
     
     elif args.version == 'original':

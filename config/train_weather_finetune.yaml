@@ -8,13 +8,14 @@ base_config:
 
 pipeline:
   name: MarigoldDepthPipeline
+  phase: weather
   kwargs:
     scale_invariant: true
     shift_invariant: true
     default_denoising_steps: 4
     default_processing_resolution: 768
 
-ramit_path: output/train_rasmit_latent/checkpoint/iter_080000/ramit.pth
+warmup_path: output/train_weather_warmup/checkpoint/latest
 
 depth_normalization:
   type: scale_shift_depth
@@ -30,18 +31,17 @@ dataloader:
   num_workers: 2
   effective_batch_size: 32
   max_train_batch_size: 8
-  seed: 2040  # to ensure continuity when resuming from checkpoint
+  seed: 2025  # to ensure continuity when resuming from checkpoint
 
 trainer:
   name: WeatherRAMDepthTrainer
   training_noise_scheduler:
     pretrained_path: marigold-depth-v1-1
-  init_seed: 2040  # use null to train w/o seeding
-  save_period: 50
+  init_seed: 2025  # use null to train w/o seeding
+  save_period: 1000
   backup_period: 2000
   validation_period: 500
   visualization_period: 1000
-  training_version: encoder_only # full, encoder_only, ramit_only
 
 multi_res_noise:
   strength: 0.9
@@ -52,7 +52,7 @@ gt_depth_type: depth_filled_norm
 gt_mask_type: null # valid_mask_raw
 
 max_epoch: 10000  # a large enough number
-max_iter: 25000   # usually converges at around 25k
+max_iter: 15000   # usually converges at around 20k
 
 optimizer:
   name: Adam
@@ -62,15 +62,15 @@ loss:
   kwargs:
     reduction: mean
 
-lr: 3.0e-05
+lr: 2.0e-05
 lr_scheduler:
   name: IterExponential
   kwargs:
-    total_iter: 25000
+    total_iter: 15000
     final_ratio: 0.01
-    warmup_steps: 100
+    warmup_steps: 200
 weight_decay: 1.0e-2
-head_lr_mult: 3.0
+head_lr_mult: 1.0
 
 # Light setting for the in-training validation and visualization
 validation:

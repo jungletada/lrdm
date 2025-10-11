@@ -28,6 +28,7 @@
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
 
+from ast import arg
 from sqlite3 import adapters
 import sys
 import os
@@ -45,6 +46,8 @@ import torch
 from torch.utils.data import ConcatDataset, DataLoader
 from huggingface_hub import hf_hub_download
 from huggingface_hub import snapshot_download
+from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler
+from transformers import CLIPTextModel, CLIPTokenizer
 
 from marigold import MarigoldDepthPipeline
 from src.dataset import BaseDepthDataset, DatasetMode, get_dataset
@@ -78,8 +81,14 @@ def get_args():
     parser.add_argument(
         "--config",
         type=str,
-        default="config/train_marigold_depth.yaml",
+        default="config/train_weather_warmup.yaml",
         help="Path to config file.",
+    )
+    parser.add_argument(
+        "--training_version", 
+        type=str,
+        default="adapter_only", # full, encoder_only, adapter_only
+        help="Specify the training method.",
     )
     parser.add_argument(
         "--resume_run",
@@ -114,7 +123,7 @@ def get_args():
     parser.add_argument(
         "--base_ckpt_dir",
         type=str,
-        default='checkpoint',
+        default='checkpoint/marigold-depth-v1-1',
         help="Base path to the pretrained checkpoints.",
     )
     parser.add_argument(
@@ -172,6 +181,7 @@ if "__main__" == __name__:
         os.makedirs(out_dir_run, exist_ok=True)
 
     cfg_data = cfg.dataset
+    cfg.trainer.training_version = args.training_version
     # base_data_dir = cfg.dataset.dir
 
     # Other directories
@@ -340,15 +350,31 @@ if "__main__" == __name__:
 
     # -------------------- Model --------------------
     _pipeline_kwargs = cfg.pipeline.kwargs if cfg.pipeline.kwargs is not None else {}
-    sd_model_path = os.path.join(base_ckpt_dir, cfg.model.pretrained_path)
-    logging.info(f'pretrained_model_path: {sd_model_path}')
+    # sd_model_path = os.path.join(base_ckpt_dir, cfg.model.pretrained_path)
+    logging.info(f'pretrained_model_path: {base_ckpt_dir}')
     # snapshot_download("stabilityai/stable-diffusion-2", local_dir=sd_model_path)
     adapter = RAMiTCond()
-    pipe = MarigoldDepthPipeline.from_pretrained(
-        sd_model_path, 
-        adapter=adapter,
-        **_pipeline_kwargs
-    )
+    if cfg.pipeline.phase == 'warmup':
+        pipeline = MarigoldDepthPipeline.from_pretrained(
+            base_ckpt_dir, 
+            adapter=adapter, # you can set 'adapter=None'
+            **_pipeline_kwargs
+        )
+    elif cfg.pipeline.phase == 'weather':
+        vae = AutoencoderKL.from_pretrained(base_ckpt_dir, subfolder="vae")
+        scheduler = DDIMScheduler.from_pretrained(base_ckpt_dir, subfolder="scheduler")
+        text_encoder = CLIPTextModel.from_pretrained(base_ckpt_dir, subfolder="text_encoder")
+        tokenizer = CLIPTokenizer.from_pretrained(base_ckpt_dir, subfolder="tokenizer")
+        unet = UNet2DConditionModel.from_pretrained(cfg.warmup_path, subfolder="unet")
+        adapter = RAMiTCond.from_pretrained(cfg.warmup_path, subfolder="adapter")
+        pipeline = MarigoldDepthPipeline(
+            unet=unet,
+            vae=vae,
+            scheduler=scheduler,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            adapter=adapter, # you can set 'adapter=None'
+        )
 
     # -------------------- Trainer --------------------
     # Exit time
@@ -362,7 +388,7 @@ if "__main__" == __name__:
     logging.debug(f"Trainer: {trainer_cls}")
     trainer = trainer_cls(
         cfg=cfg,
-        model=pipe,
+        model=pipeline,
         train_dataloader=train_loader,
         device=device,
         out_dir_ckpt=out_dir_ckpt,

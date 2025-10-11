@@ -4,14 +4,15 @@ set -x
 
 # Use specified checkpoint path, otherwise, default value
 ckpt=${1:-"checkpoint/marigold-depth-v1-1"}
-ramit_ckpt=${2:-"output/train_rasmit_latent/checkpoint/iter_080000/ramit.pth"}
+finetune_ckpt=${2:-"checkpoint/marigold-depth-v1-1"}
+# finetune_ckpt=${2:-"output/train_weather_depth/checkpoint/iter_025000"}
 subfolder=${3:-"eval"}
 n_ensemble=${4:-1}
 output_child_dir=${5:-"latent_restore"}
 
 python script/depth/infer.py \
     --base_checkpoint $ckpt \
-    --seed 2025 \
+    --seed 2026 \
     --base_data_dir data/kitti \
     --denoise_steps 2 \
     --ensemble_size ${n_ensemble} \
@@ -19,7 +20,7 @@ python script/depth/infer.py \
     --dataset_config config/dataset_depth/data_kitti_eigen_test.yaml \
     --output_dir output/${subfolder}/kitti_eigen_test/${output_child_dir} \
     --version restore \
-    --ramit_checkpoint ${ramit_ckpt}
+    --finetune_checkpoint ${finetune_ckpt}
 
 
 python script/depth/eval.py \

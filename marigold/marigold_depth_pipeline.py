@@ -27,7 +27,6 @@
 #   https://github.com/prs-eth/Marigold#-citation
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
-
 import logging
 import numpy as np
 import torch
@@ -122,7 +121,7 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         self,
         unet: UNet2DConditionModel,
         vae: AutoencoderKL,
-        adapter: RAMiTCond,
+        adapter: Optional[RAMiTCond],
         scheduler: Union[DDIMScheduler, LCMScheduler],
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
@@ -132,6 +131,9 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         default_processing_resolution: Optional[int] = None,
     ):
         super().__init__()
+        # Ensure `adapter` attribute exists even when not provided so that
+        # pipeline component validation finds it.
+        self.adapter = adapter
         self.register_modules(
             unet=unet,
             vae=vae,
@@ -572,7 +574,7 @@ class MarigoldDepthPipeline(DiffusionPipeline):
         Returns:
             `torch.Tensor`: Predicted targets.
         """
-        device = self.device
+        device = self.unet.device
         rgb_in = rgb_in.to(device)
 
         # Set timesteps
@@ -609,9 +611,15 @@ class MarigoldDepthPipeline(DiffusionPipeline):
             iterable = enumerate(timesteps)
 
         for i, t in iterable:
-            unet_input = torch.cat(
-                [rgb_latent, target_latent], dim=1
-            )  # this order is important
+            if hasattr(self, "adapter") and self.adapter is not None:
+                res_latent = self.adapter(rgb_in, rgb_latent)
+                unet_input = torch.cat((
+                    res_latent, target_latent), dim=1
+                )  # this order is important
+            else:
+                unet_input = torch.cat(
+                    [rgb_latent, target_latent], dim=1
+                )  # this order is important
 
             # predict the noise residual
             noise_pred = self.unet(

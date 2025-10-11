@@ -112,7 +112,17 @@ def get_args():
         default=None,
         help="Max operating resolution used for LS alignment",
     )
-    parser.add_argument("--no_cuda", action="store_true", help="Run without cuda.")
+    parser.add_argument(
+        "--cmap",
+        type=str,
+        default="Spectral",
+        help="Colormap used for saving depth maps",
+    )
+    parser.add_argument(
+        "--no_cuda", 
+        action="store_true", 
+        help="Run without cuda."
+        )
     return parser.parse_args()
 
 
@@ -129,7 +139,7 @@ def extract_group(filename):
         return 'unknown'
 
 
-def save_filled_depth(args, valid_mask, depth_raw, pred_name):
+def save_filled_depth(args, valid_mask, depth_raw, pred_name, depth_pred):
     """
         Save filled depth
     """
@@ -160,7 +170,7 @@ def save_prediction_heatmap(args, depth_pred, depth_raw, pred_name):
             arr = tensor
         plt.figure()
         plt.axis('off')
-        plt.imshow(arr, cmap="Spectral")
+        plt.imshow(arr, cmap=args.cmap)
         plt.tight_layout(pad=0)
         # Ensure the directory exists before saving
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -171,7 +181,8 @@ def save_prediction_heatmap(args, depth_pred, depth_raw, pred_name):
     gt_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_gt.png'))
     save_heatmap(depth_pred, 
                  pred_heatmap_path)
-    save_heatmap(torch.from_numpy(depth_raw).to(device).squeeze(), 
+    # depth_raw can be a NumPy array already; avoid relying on external device state
+    save_heatmap(depth_raw.squeeze(), 
                  gt_heatmap_path)
     
     
@@ -318,4 +329,5 @@ if "__main__" == __name__:
     # Get average
     grouped_avg = result_df.groupby('group').mean(numeric_only=True)
     per_group_filename = os.path.join(args.output_dir, "per_group_metrics.csv")
-    grouped_avg.to_csv(per_group_filename, index='group')
+    # Write grouped averages with an explicit index label
+    grouped_avg.to_csv(per_group_filename, index=True, index_label='group')

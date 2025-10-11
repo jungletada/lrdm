@@ -5,81 +5,16 @@ extracting high-resolution depth maps in our CVPR 2024 paper **"Repurposing Diff
 Depth Estimation"**, we extended the method to other modalities as described in our follow-up paper **"Marigold: Affordable 
 Adaptation of Diffusion-Based Image Generators for Image Analysis"**.  -->
 
-
-[![Website](doc/badges/badge-website.svg)](https://marigoldcomputervision.github.io)
-[![Paper](doc/badges/badge-pdf.svg)](https://arxiv.org/abs/2505.09358)
-[![Depth Demo](https://img.shields.io/badge/🤗%20Depth-Demo-yellow)](https://huggingface.co/spaces/prs-eth/marigold)
-[![Normals Demo](https://img.shields.io/badge/🤗%20Normals-Demo-yellow)](https://huggingface.co/spaces/prs-eth/marigold-normals)
-[![Intrinsics Demo](https://img.shields.io/badge/🤗%20Image%20Intrinsics-Demo-yellow)](https://huggingface.co/spaces/prs-eth/marigold-iid)
-[![Depth Model](https://img.shields.io/badge/🤗%20Depth-Model-green)](https://huggingface.co/prs-eth/marigold-depth-v1-1)
-[![Normals Model](https://img.shields.io/badge/🤗%20Normals-Model-green)](https://huggingface.co/prs-eth/marigold-normals-v1-1)
-[![Intrinsics Appearance Model](https://img.shields.io/badge/🤗%20Image%20Intrinsics%20Appearance-Model-green)](https://huggingface.co/prs-eth/marigold-iid-appearance-v1-1)
-[![Intrinsics Lighting Model](https://img.shields.io/badge/🤗%20Image%20Intrinsics%20Lighting-Model-green)](https://huggingface.co/prs-eth/marigold-iid-lighting-v1-1)
-[![Diffusers Tutorial](doc/badges/badge-hfdiffusers.svg)](https://huggingface.co/docs/diffusers/using-diffusers/marigold_usage)
-
 Team:
-[Bingxin Ke](http://www.kebingxin.com/),
-[Kevin Qu](https://www.linkedin.com/in/kevin-qu-b3417621b/),
-[Tianfu Wang](https://tianfwang.github.io/)
-[Nando Metzger](https://nandometzger.github.io/),
-[Shengyu Huang](https://shengyuh.github.io/),
-[Bo Li](https://www.linkedin.com/in/bobboli0202/),
-[Anton Obukhov](https://www.obukhov.ai/),
-[Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ)
+[Dingjie PENG](),
+[Junpei XUE](),
 
-
-<!-- ## Repurposing Diffusion-Based Image Generators for Monocular Depth Estimation
-
-[![Website](doc/badges/badge-website.svg)](https://marigoldmonodepth.github.io)
-[![Paper](doc/badges/badge-pdf.svg)](https://arxiv.org/abs/2312.02145)
-[![Hugging Face Space](https://img.shields.io/badge/🤗%20Hugging%20Face-Space-yellow)](https://huggingface.co/spaces/prs-eth/marigold)
-[![Hugging Face Model](https://img.shields.io/badge/🤗%20Hugging%20Face%20-Model-green)](https://huggingface.co/prs-eth/marigold-depth-v1-1)
-[![Open In Colab](doc/badges/badge-colab.svg)](https://colab.research.google.com/drive/12G8reD13DdpMie5ZQlaFNo2WCGeNUH-u?usp=sharing)
-
-In **CVPR 2024 (Oral, Best Paper Award Candidate)**<br> 
-Team:
-[Bingxin Ke](http://www.kebingxin.com/),
-[Anton Obukhov](https://www.obukhov.ai/),
-[Shengyu Huang](https://shengyuh.github.io/),
-[Nando Metzger](https://nandometzger.github.io/),
-[Rodrigo Caye Daudt](https://rcdaudt.github.io/),
-[Konrad Schindler](https://scholar.google.com/citations?user=FZuNgqIAAAAJ) -->
-
-## 🚀 Usage
-
-**We offer several ways to interact with Marigold**:
-
-1. A family of free online interactive demos: 
-<a href="https://huggingface.co/spaces/prs-eth/marigold"><img src="https://img.shields.io/badge/🤗%20Depth-Demo-yellow" height="16"></a> 
-<a href="https://huggingface.co/spaces/prs-eth/marigold-normals"><img src="https://img.shields.io/badge/🤗%20Normals-Demo-yellow" height="16"></a> 
-<a href="https://huggingface.co/spaces/prs-eth/marigold-iid"><img src="https://img.shields.io/badge/🤗%20Image%20Intrinsics-Demo-yellow" height="16"></a> 
-(kudos to the HF team for the GPU grants)
-
-1. Marigold pipelines are part of
-<a href="https://huggingface.co/docs/diffusers/using-diffusers/marigold_usage"><img src="doc/badges/badge-hfdiffusers.svg" height="16"></a> - a one-stop shop for diffusion 🧨!
-
-1. Run the demo locally (requires a GPU and an `nvidia-docker2`, see [Installation Guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)):
-`docker run -it -p 7860:7860 --platform=linux/amd64 --gpus all registry.hf.space/prs-eth-marigold:latest python app.py`
-
-1. Extended demo on a Google Colab: <a href="https://colab.research.google.com/drive/12G8reD13DdpMie5ZQlaFNo2WCGeNUH-u?usp=sharing"><img src="doc/badges/badge-colab.svg" height="16"></a>
-
-1. If you just want to see the examples, visit our gallery: <a href="https://marigoldcomputervision.github.io"><img src="doc/badges/badge-website.svg" height="16"></a>
-
-1. Finally, local development instructions with this codebase are given below.
 
 ## 🛠️ Setup
 
 The inference code was tested on:
 
 - Ubuntu 22.04 LTS, Python 3.10.12,  CUDA 11.7, GeForce RTX 3090 (pip)
-
-### 🪧 A Note for Windows users
-
-We recommend running the code in WSL2:
-
-1. Install WSL following [installation guide](https://learn.microsoft.com/en-us/windows/wsl/install#install-wsl-command).
-1. Install CUDA support for WSL following [installation guide](https://docs.nvidia.com/cuda/wsl-user-guide/index.html#cuda-support-for-wsl-2).
-1. Find your drives in `/mnt/<drive letter>/`; check [WSL FAQ](https://learn.microsoft.com/en-us/windows/wsl/faq#how-do-i-access-my-c--drive-) for more details. Navigate to the working directory of choice. 
 
 ### 📦 Repository
 
@@ -191,10 +126,14 @@ Prepare for [Hypersim](https://github.com/apple/ml-hypersim), [Interiorverse](ht
 
 *Lighting model*: Prepare for [Hypersim](https://github.com/apple/ml-hypersim) dataset and save into `${BASE_DATA_DIR}`. Please refer to [this README](script/iid/dataset_preprocess/hypersim_lighting/README.md) for Hypersim preprocessing.
 
-### Run training script
+### Run training script for finetuing
 ```bash
-python script/depth/train.py --config config/train_weather_depth.yaml
-python script/depth/train_latent.py --config config/train_rasmit_latent.yaml
+python script/depth/train.py --config config/train_weather_warmup.yaml
+python script/depth/train.py --config config/train_weather_finetune.yaml
+```
+### Run training script for latent adapter
+```bash
+python script/depth/train_latent.py --config config/train_latent_adapter.yaml
 ```
 Resume from a checkpoint, e.g.:
 

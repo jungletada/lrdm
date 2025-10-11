@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import torch
 from torch.utils.data import DataLoader
 
-from src.dataset.kitti_latent_dataset import WeatherKITTLatentDataset
+from src.dataset.kitti_latent_dataset import WeatherKITTILatentDataset
 from src.trainer import get_trainer_cls
 from src.util.config_util import (
     recursive_load_config,
@@ -27,7 +27,7 @@ from src.util.logging_util import (
     tb_logger,
 )
 
-from marigold.ramit_model.ramit import RAMiTModule, RAMiTCond
+from marigold.ramit_model.ramit import RAMiTCond
 
 
 def get_args():
@@ -210,7 +210,7 @@ if "__main__" == __name__:
         loader_generator = torch.Generator().manual_seed(loader_seed)
 
     # Training dataset
-    train_dataset = WeatherKITTLatentDataset()
+    train_dataset = WeatherKITTILatentDataset()
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=cfg.dataloader.max_train_batch_size,
@@ -253,7 +253,7 @@ if "__main__" == __name__:
         )
     # -------------------- Training & Evaluation Loop --------------------
     try:
-        trainer.train(t_end=t_end)
-        # trainer.show_latent_difference()
+        # trainer.train(t_end=t_end)
+        trainer.show_latent_difference()
     except Exception as e:
         logging.exception(e)

@@ -230,6 +230,27 @@ class WeatherKITTIDepthMixedDataset(WeatherKITTIDepthDataset):
         return rgb_rel_path, depth_rel_path, filled_rel_path
 
 
+class KITTIDepthDataset(WeatherKITTIDepthDataset):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        print("Using sunny/original KITTI dataset to train.")
+
+    def __len__(self):
+        return len(self.rgb_files)
+    
+    def _get_data_path(self, index):
+        rgb_rel_path = self.rgb_files[index]
+        # e.g., rgb/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+        depth_rel_path, filled_rel_path = None, None
+        if DatasetMode.RGB_ONLY != self.mode:
+            # e.g., depth/2011_10_03_drive_0034_sync/image_02/data/0000001499.png
+            depth_rel_path = self.depth_files[index]
+            if self.has_filled_depth:          
+                filled_rel_path = self.aligned_depth_files[index]  # e.g., 721.5377
+        # print(rgb_rel_path, depth_rel_path, filled_rel_path)
+        return rgb_rel_path, depth_rel_path, filled_rel_path
+
+
 class WeatherKITTIDepthPairedDataset(WeatherKITTIDepthDataset):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
