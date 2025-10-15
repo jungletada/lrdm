@@ -85,6 +85,12 @@ def get_args():
         help="Path to config file.",
     )
     parser.add_argument(
+        "--max_train_batch_size",
+        type=int,
+        default=4,
+        help="Max batch size during training",
+    )
+    parser.add_argument(
         "--training_version", 
         type=str,
         default="adapter_only", # full, encoder_only, adapter_only
@@ -97,9 +103,15 @@ def get_args():
         help="Path of checkpoint to be resumed. If given, will ignore --config, and checkpoint in the config.",
     )
     parser.add_argument(
-        "--output_dir", type=str, default=None, help="Directory to save checkpoints."
+        "--output_dir", 
+        type=str, 
+        default=None, 
+        help="Directory to save checkpoints."
     )
-    parser.add_argument("--no_cuda", action="store_true", help="Do not use cuda.")
+    parser.add_argument(
+        "--no_cuda", 
+        action="store_true",
+        help="Do not use cuda.")
     parser.add_argument(
         "--exit_after",
         type=int,
@@ -166,7 +178,7 @@ if "__main__" == __name__:
         # Run from start
         cfg = recursive_load_config(args.config)
         # Full job name
-        pure_job_name = os.path.basename(args.config).split(".")[0]
+        pure_job_name = os.path.basename(args.config).split(".")[0] + "_" + args.training_version
         # Add time prefix
         if args.add_datetime_prefix:
             job_name = f"{t_start.strftime('%y_%m_%d-%H_%M_%S')}-{pure_job_name}"
@@ -182,7 +194,6 @@ if "__main__" == __name__:
 
     cfg_data = cfg.dataset
     cfg.trainer.training_version = args.training_version
-    # base_data_dir = cfg.dataset.dir
 
     # Other directories
     out_dir_ckpt = os.path.join(out_dir_run, "checkpoint")
@@ -273,7 +284,7 @@ if "__main__" == __name__:
 
     # -------------------- Gradient accumulation steps --------------------
     eff_bs = cfg.dataloader.effective_batch_size
-    accumulation_steps = eff_bs / cfg.dataloader.max_train_batch_size
+    accumulation_steps = eff_bs / args.max_train_batch_size
     assert int(accumulation_steps) == accumulation_steps
     accumulation_steps = int(accumulation_steps)
 
@@ -311,7 +322,7 @@ if "__main__" == __name__:
         concat_dataset = ConcatDataset(dataset_ls)
         mixed_sampler = MixedBatchSampler(
             src_dataset_ls=dataset_ls,
-            batch_size=cfg.dataloader.max_train_batch_size,
+            batch_size=args.max_train_batch_size,
             drop_last=True,
             prob=cfg_data.train.prob_ls,
             shuffle=True,
@@ -326,7 +337,7 @@ if "__main__" == __name__:
     else:
         train_loader = DataLoader(
             dataset=train_dataset,
-            batch_size=cfg.dataloader.max_train_batch_size,
+            batch_size=args.max_train_batch_size,
             num_workers=cfg.dataloader.num_workers,
             shuffle=True,
             generator=loader_generator,

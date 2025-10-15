@@ -183,14 +183,14 @@ def get_pipeline(args):
         text_encoder = CLIPTextModel.from_pretrained(args.base_checkpoint, subfolder="text_encoder")
         tokenizer = CLIPTokenizer.from_pretrained(args.base_checkpoint, subfolder="tokenizer")
         unet = UNet2DConditionModel.from_pretrained(args.finetune_checkpoint, subfolder="unet")
-        # adapter = RAMiTCond.from_pretrained(args.finetune_checkpoint, subfolder="adapter")
+        adapter = RAMiTCond.from_pretrained(args.finetune_checkpoint, subfolder="adapter")
         pipeline = MarigoldDepthPipeline(
             unet=unet,
             vae=vae,
             scheduler=scheduler,
             text_encoder=text_encoder,
             tokenizer=tokenizer,
-            adapter=None,
+            adapter=adapter,
         )
     
     elif args.version == 'original':

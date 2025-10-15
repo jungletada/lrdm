@@ -104,6 +104,7 @@ def save_grid(image_sequence):
        image_sequence: list, with each (4, H, W), total length (domains) = N 
     """
 
+
 class RAMiTLatentTrainer:
     def __init__(
         self,
