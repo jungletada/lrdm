@@ -28,22 +28,24 @@
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
 import os
-from sqlite3 import adapters
 import sys
 import argparse
 import logging
-from tqdm.auto import tqdm
-sys.path.insert(0, os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..")))
-import torch
 from PIL import Image
 import numpy as np
 from omegaconf import OmegaConf
+from tqdm.auto import tqdm
+sys.path.insert(0, os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..")))
+
+import torch
 from torch.utils.data import DataLoader
+from torchvision.utils import save_image
 from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
+
 from marigold.ramit_model.ramit import RAMiTCond
-from marigold import MarigoldDepthPipeline, MarigoldDepthOutput
+from marigold import MarigoldDepthPipeline
 from marigold import LDRMDepthPipeline
 
 from src.dataset import (
@@ -98,7 +100,10 @@ def get_args():
         help="Base path to the datasets.",
     )
     parser.add_argument(
-        "--output_dir", type=str, required=True, help="Output directory."
+        "--output_dir", 
+        type=str, 
+        required=True, 
+        help="Output directory."
     )
     parser.add_argument(
         "--denoise_steps",
@@ -327,45 +332,21 @@ if "__main__" == __name__:
         for batch in tqdm(
             dataloader, desc=f"Depth Inference on {dataset.disp_name}", leave=True
         ):
-            input_image = batch["rgb_int"]
-            # Random number generator
-            if seed is None:
-                generator = None
-            else:
-                generator = torch.Generator(device=device)
-                generator.manual_seed(seed)
-            
-            # Perform inference
-            pipe_output: MarigoldDepthOutput = pipeline(
-                input_image,
-                denoising_steps=denoise_steps,
-                ensemble_size=ensemble_size,
-                processing_res=processing_res,
-                match_input_res=match_input_res,
-                batch_size=0,
-                color_map=None,
-                show_progress_bar=False,
-                resample_method=resample_method,
-                generator=generator,
-            )
-            
-            depth_pred: np.ndarray = pipe_output.depth_np
-            # latent_output: torch.Tensor = pipe_output.latent_ts
-            # latent_output = latent_output.cpu().numpy()
+            input_image = batch["rgb_norm"]
+            rgb_filename = batch["rgb_relative_path"][0]
+            if rgb_filename.__contains__('rgb'):
+                sunny_latent = pipeline.encode_rgb(input_image)
             
             # Save predictions
-            rgb_filename = batch["rgb_relative_path"][0]
             rgb_basename = os.path.basename(rgb_filename)
             scene_dir = os.path.join(output_dir, os.path.dirname(rgb_filename))
             
             if not os.path.exists(scene_dir):
                 os.makedirs(scene_dir)
-
-            pred_basename = rgb_basename.replace(".png", ".npy")
             
-            save_to = os.path.join(scene_dir, pred_basename)
+            save_to = os.path.join(scene_dir, rgb_basename)
             if os.path.exists(save_to):
                 logging.warning(f"Existing file: '{save_to}' will be overwritten")
             
-            # np.save(save_to, latent_output.squeeze())
-            np.save(save_to, depth_pred)
+            rgb_out = pipe_output.detach().cpu()
+            save_image(rgb_out, save_to)

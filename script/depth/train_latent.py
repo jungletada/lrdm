@@ -1,5 +1,7 @@
 import sys
 import os
+
+# from script.depth.train import vae
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")))
 import argparse
@@ -12,12 +14,15 @@ from datetime import datetime, timedelta
 
 import torch
 from torch.utils.data import DataLoader
+from diffusers import AutoencoderKL
 
-from src.dataset.kitti_latent_dataset import WeatherKITTILatentDataset
 from src.trainer import get_trainer_cls
+from src.dataset.kitti_latent_dataset import (
+    WeatherKITTILatentDataset
+    )
 from src.util.config_util import (
     recursive_load_config,
-)
+    )
 from src.util.logging_util import (
     config_logging,
     init_wandb,
@@ -76,7 +81,7 @@ def get_args():
     parser.add_argument(
         "--base_ckpt_dir",
         type=str,
-        default='checkpoint',
+        default='checkpoint/marigold-depth-v1-1',
         help="Base path to the pretrained checkpoints.",
     )
     parser.add_argument(
@@ -218,8 +223,6 @@ if "__main__" == __name__:
         shuffle=True,
         generator=loader_generator,
     )
-    
-    # Visualize dataset
 
     # -------------------- Model --------------------
     model = RAMiTCond(
@@ -227,6 +230,9 @@ if "__main__" == __name__:
         depths=cfg.model.depths, 
         num_heads=cfg.model.num_heads, 
     )
+    # -------------------- VAE --------------------
+    vae = AutoencoderKL.from_pretrained(base_ckpt_dir, subfolder="vae")
+    
     # -------------------- Trainer --------------------
     # Exit time
     if args.exit_after > 0:
@@ -240,6 +246,7 @@ if "__main__" == __name__:
     trainer = trainer_cls(
         cfg=cfg,
         model=model,
+        vae=vae,
         train_dataloader=train_loader,
         visualize_dataset=train_dataset,
         device=device,
@@ -253,7 +260,7 @@ if "__main__" == __name__:
         )
     # -------------------- Training & Evaluation Loop --------------------
     try:
-        # trainer.train(t_end=t_end)
-        trainer.show_latent_difference()
+        trainer.train(t_end=t_end)
+        # trainer.show_latent_difference()
     except Exception as e:
         logging.exception(e)

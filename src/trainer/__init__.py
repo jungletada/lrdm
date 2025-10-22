@@ -28,18 +28,17 @@
 # If you find Marigold useful, we kindly ask you to cite our papers.
 # --------------------------------------------------------------------------
 
+# from .marigold_iid_trainer import MarigoldIIDTrainer
+# from .marigold_normals_trainer import MarigoldNormalsTrainer
 from .marigold_depth_trainer import MarigoldDepthTrainer
-from .marigold_iid_trainer import MarigoldIIDTrainer
-from .marigold_normals_trainer import MarigoldNormalsTrainer
-from .weather_ram_trainer import WeatherRAMDepthTrainer
-from .ramit_latent_trainer import RAMiTLatentTrainer
+from .weather_depth_trainer import WeatherDepthTrainer
+from .latent_trainer import LatentTrainer
+
 
 trainer_cls_name_dict = {
     "MarigoldDepthTrainer": MarigoldDepthTrainer,
-    "MarigoldIIDTrainer": MarigoldIIDTrainer,
-    "MarigoldNormalsTrainer": MarigoldNormalsTrainer,
-    "WeatherRAMDepthTrainer": WeatherRAMDepthTrainer,
-    "RAMiTLatentTrainer": RAMiTLatentTrainer,
+    "WeatherRAMDepthTrainer": WeatherDepthTrainer,
+    "LatentTrainer": LatentTrainer,
 }
 
 

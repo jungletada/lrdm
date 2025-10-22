@@ -32,6 +32,7 @@ from ast import arg
 from sqlite3 import adapters
 import sys
 import os
+from webbrowser import get
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")))
 import argparse
@@ -70,7 +71,7 @@ from src.util.logging_util import (
     tb_logger,
 )
 from src.util.slurm_util import get_local_scratch_dir, is_on_slurm
-from marigold.ramit_model.ramit import RAMiTCond
+from marigold.ramit_model.ramit import RAMiTCond, get_model
 
 
 def get_args():
@@ -95,6 +96,18 @@ def get_args():
         type=str,
         default="adapter_only", # full, encoder_only, adapter_only
         help="Specify the training method.",
+    )
+    parser.add_argument(
+        "--warmup_path", 
+        type=str,
+        default="output/train_weather_warmup_adapter_only/checkpoint/latest", # full, encoder_only, adapter_only
+        help="Specify the warmup path.",
+    )
+    parser.add_argument(
+        "--model_type", 
+        type=str,
+        default="small", # full, encoder_only, adapter_only
+        help="Specify the model type: tiny, small or base",
     )
     parser.add_argument(
         "--resume_run",
@@ -191,10 +204,13 @@ if "__main__" == __name__:
         else:
             out_dir_run = os.path.join("./output", job_name)
         os.makedirs(out_dir_run, exist_ok=True)
+        
+        # Make warmup_path
+        if args.training_version is not None and cfg.warmup_path is not None:
+            cfg.warmup_path = cfg.warmup_path.replace('warmup', f'warmup_{args.training_version}')
 
     cfg_data = cfg.dataset
     cfg.trainer.training_version = args.training_version
-
     # Other directories
     out_dir_ckpt = os.path.join(out_dir_run, "checkpoint")
     if not os.path.exists(out_dir_ckpt):
@@ -364,7 +380,7 @@ if "__main__" == __name__:
     # sd_model_path = os.path.join(base_ckpt_dir, cfg.model.pretrained_path)
     logging.info(f'pretrained_model_path: {base_ckpt_dir}')
     # snapshot_download("stabilityai/stable-diffusion-2", local_dir=sd_model_path)
-    adapter = RAMiTCond()
+    adapter = get_model(model_type=args.model_type)
     if cfg.pipeline.phase == 'warmup':
         pipeline = MarigoldDepthPipeline.from_pretrained(
             base_ckpt_dir, 

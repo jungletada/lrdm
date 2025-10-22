@@ -105,7 +105,7 @@ def save_grid(image_sequence):
     """
 
 
-class RAMiTLatentTrainer:
+class LatentTrainer:
     def __init__(
         self,
         cfg: OmegaConf,
@@ -141,10 +141,10 @@ class RAMiTLatentTrainer:
 
         # Building Loss
         self.smooth_l1_loss = nn.SmoothL1Loss()
+        self.train_metrics = MetricTracker(*["loss"])
         # self.charbonnier_loss = CharbonnierLoss()
         # self.ssim_loss = SSIMLoss()
-        self.train_metrics = MetricTracker(*["loss"])
-    
+        
         # Settings
         self.max_epoch = self.cfg.max_epoch
         self.max_iter = self.cfg.max_iter

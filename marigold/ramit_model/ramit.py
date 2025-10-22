@@ -544,56 +544,45 @@ class Reconstruction(nn.Module):
    
 class SEGate2d(nn.Module):
     """
-        x: [B, C, H, W]  ->  g: [B, d, H, W]  (sigmoid门控)
-        做法：Conv1x1将C->d，然后对z做SE(channel attention)，得到通道权重w，并与z逐点相乘作为门控g。
+        x: [B, C, H, W]  ->  g: [B, d, H, W]
     """
     def __init__(self, in_channels: int, out_channels: int, hidden: int = 4):
         super().__init__()
         self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
 
         # Squeeze: GAP -> [B, d, 1, 1]
-        # Excitation: 两层FC(用1x1卷积实现)
+        # Excitation: two-layer FC (1x1 Conv)
         self.fc1 = nn.Conv2d(out_channels, hidden, kernel_size=1)
         self.fc2 = nn.Conv2d(hidden, out_channels, kernel_size=1)
         self.act = nn.SiLU()
 
-        # 可选：初始化更稳定（非必需）
         nn.init.kaiming_normal_(self.proj.weight, nonlinearity="relu")
         nn.init.kaiming_normal_(self.fc1.weight, nonlinearity="relu")
         nn.init.zeros_(self.fc2.weight)
 
     def forward(self, x):
-        # 1) 通道映射 C->d
         z = self.proj(x)                          # [B, d, H, W]
-        # 2) Squeeze（全局平均池化）得到通道描述
         s = F.adaptive_avg_pool2d(z, 1)           # [B, d, 1, 1]
-        # 3) Excitation（两层MLP）得到通道权重
         w = self.fc2(self.act(self.fc1(s)))       # [B, d, 1, 1]
-        # 4) 生成门控图（带空间信息）：逐点调制
         g = z * w     # [B, d, H, W] 
         return g
 
 class CBAMGate2d(nn.Module):
     """
         x: [B, C, H, W] -> g: [B, d, H, W]
-        先做SE样式的通道门控, 再做CBAM样式的空间门控（avg/max通道池化 -> 7x7 conv）。
     """
     def __init__(self, in_channels: int, out_channels: int, reduction: int = 16, spatial_kernel: int = 3):
         super().__init__()
         self.channel_gate = SEGate2d(in_channels, out_channels, reduction)
-        # 空间门控：按照CBAM，用通道平均与通道最大池化，拼接后卷积生成 [B, 1, H, W]
         padding = spatial_kernel // 2
         self.spatial_conv = nn.Conv2d(2, 1, kernel_size=spatial_kernel, padding=padding, bias=False)
         nn.init.kaiming_normal_(self.spatial_conv.weight, nonlinearity="relu")
 
     def forward(self, x):
-        # 先得到通道门控后的中间特征（仍作为门控图的基础）
         g_c = self.channel_gate(x)  # [B, d, H, W]
-        # 依据CBAM思路生成空间注意力
         avg_pool = torch.mean(g_c, dim=1, keepdim=True)    # [B, 1, H, W]
         max_pool, _ = torch.max(g_c, dim=1, keepdim=True)  # [B, 1, H, W]
         s_map = self.spatial_conv(torch.cat([avg_pool, max_pool], dim=1))  # [B, 1, H, W]
-        # 将空间门控广播到 d 个通道
         g = g_c * s_map  # [B, d, H, W]
         return g
 
@@ -625,7 +614,7 @@ class CondConvResidual(nn.Module):
 class RAMiTCond(nn.Module):
     def __init__(self, 
                  input_dim=4, 
-                 dim=24, 
+                 dim=24,              
                  depths=(2,4,4,2),
                  num_heads=(4,4,4,4), 
                  head_dim=None, 
@@ -822,7 +811,29 @@ class RAMiTCond(nn.Module):
             if 'relative_position_bias_table' in n:
                 nwd.add(n)
         return nwd
-    
+
+
+def get_model(model_type='tiny'):
+    if model_type == 'tiny':
+        return RAMiTCond(
+            dim=4,
+            depths=(4, 2, 2, 4),
+            num_heads=(2, 2, 2, 2),
+        )
+    elif model_type == 'small':
+        return RAMiTCond(
+            dim=24,
+            depths=(2, 4, 4, 2),
+            num_heads=(4, 4, 4, 4),
+        )
+    elif model_type == 'base':
+        return RAMiTCond(
+            dim=24,
+            depths=(6, 4, 4, 6),
+            num_heads=(4, 4, 4, 4),
+        )
+
+
 if __name__ == '__main__':
     H = 352
     W = 1216

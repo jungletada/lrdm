@@ -42,11 +42,10 @@ import numpy as np
 import torch
 from torch.nn import Conv2d
 from torch.nn.parameter import Parameter
-
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
-from diffusers import DDPMScheduler, DDIMScheduler
 
+from diffusers import DDPMScheduler, DDIMScheduler
 from src.util import metric
 from src.util.alignment import align_depth_least_square
 from src.util.data_loader import skip_first_batches
@@ -58,7 +57,6 @@ from src.util.multi_res_noise import multi_res_noise_like
 from src.util.seeding import generate_seed_sequence
 from marigold.marigold_depth_pipeline import MarigoldDepthPipeline, MarigoldDepthOutput
 
-# Import safetensors for loading .safetensors files
 try:
     from safetensors import safe_open
     SAFETENSORS_AVAILABLE = True
@@ -66,7 +64,7 @@ except ImportError:
     SAFETENSORS_AVAILABLE = False
 
 
-class WeatherRAMDepthTrainer:
+class WeatherDepthTrainer:
     def __init__(
         self,
         cfg: OmegaConf,
@@ -285,7 +283,6 @@ class WeatherRAMDepthTrainer:
             
         elif ver == "adapter_only":
             # 仅训练输入侧的适配/恢复模块。若你的 RAMiT 在 UNet 之外，请按需单独启用。
-            # self._set_requires_grad(parts.get("conv_in"), True)
             logging.info(f"Using restoration module parameters training.")
         else:
             raise NotImplementedError(f"Unknown training_version: {ver}")

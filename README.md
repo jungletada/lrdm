@@ -8,21 +8,22 @@ Adaptation of Diffusion-Based Image Generators for Image Analysis"**.  -->
 Team:
 [Dingjie PENG](),
 [Junpei XUE](),
+---------
 
-
+Waseda University
 ## 🛠️ Setup
 
 The inference code was tested on:
 
-- Ubuntu 24.04 LTS, Python 3.10.12,  CUDA 11.7, GeForce RTX A6000 (pip)
+- Ubuntu 24.04 LTS, Python 3.8.20, CUDA 12.2, RTX A6000 (pip)
 
 ### 📦 Repository
 
 Clone the repository (requires git):
 
 ```bash
-git clone https://github.com/jungletada/Marigold-Weather.git
-cd Marigold-Weather
+git clone https://github.com/jungletada/lrdm.git
+cd lrdm
 ```
 
 
@@ -45,7 +46,11 @@ data/kitti
 └── snowgan
  </pre>
 
-
+### Checkpoint `marigold-depth-v1-1`
+<pre>
+checkpoint
+├── marigold-depth-v1-1
+</pre>
 ### 💻 Dependencies
 
 Install the dependencies:
@@ -106,6 +111,7 @@ bash script/depth/infer_eval_kitti.sh \
 Note: although the seed has been set, the results might still be slightly different on different hardware.
  
 ## 🏋️ Training
+### Training using Stable Diffusion
 Based on the previously created environment, install extended requirements:
 ```bash
 pip install -r requirements++.txt -r requirements+.txt -r requirements.txt
@@ -129,8 +135,7 @@ ${batchsize}=`4` (default)
 
 For example, training with full UNet with a batch size of 4:
 ```bash
-
-
+bash script/depth/train.sh full 4
 ```
 Resume from a checkpoint, e.g.:
 
@@ -138,9 +143,10 @@ Resume from a checkpoint, e.g.:
 python script/depth/train.py --resume_run output/train_weather_depth_${version}/checkpoint/latest
 ```
 
-------
+----------------
 
-<!-- ### Run training script for latent adapter
+<!-- ### Training using latent adapter
+Run training script for latent adapter
 ```bash
 python script/depth/train_latent.py --config config/train_latent_adapter.yaml
 ``` -->

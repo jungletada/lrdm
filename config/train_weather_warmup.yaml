@@ -67,7 +67,8 @@ lr_scheduler:
     total_iter: 5000
     final_ratio: 0.01
     warmup_steps: 100
-    
+
+warmup_path: null    
 
 # Light setting for the in-training validation and visualization
 validation:

@@ -734,6 +734,7 @@ class DynamicConv(nn.Module):
             x = self._forward_inner(x)
         return x
 
+
 if __name__ == '__main__':
 
     x = torch.randn(1, 64, 32, 32).cuda()
