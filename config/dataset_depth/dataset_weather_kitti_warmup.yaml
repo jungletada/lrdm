@@ -1,6 +1,6 @@
 dataset:
   train:
-    name: depth_kitti
+    name: kitti_depth
     disp_name: kitti_depth_eigen_train_full
     dir: data/kitti
     filenames: data_split/kitti_depth/eigen_train_files_with_gt.txt

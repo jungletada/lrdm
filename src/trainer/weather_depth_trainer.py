@@ -55,7 +55,10 @@ from src.util.lr_scheduler import IterExponential
 from src.util.metric import MetricTracker
 from src.util.multi_res_noise import multi_res_noise_like
 from src.util.seeding import generate_seed_sequence
+
 from marigold.marigold_depth_pipeline import MarigoldDepthPipeline, MarigoldDepthOutput
+from marigold.igled_pipeline import iGlemDepthPipeline
+from marigold.ramit_model.depth_filter import SpatiallyVaryingDepthFilter
 
 try:
     from safetensors import safe_open
@@ -68,7 +71,7 @@ class WeatherDepthTrainer:
     def __init__(
         self,
         cfg: OmegaConf,
-        model: MarigoldDepthPipeline,
+        model: Optional[Union[MarigoldDepthPipeline, iGlemDepthPipeline]],
         train_dataloader: DataLoader,
         device,
         out_dir_ckpt,
@@ -79,7 +82,7 @@ class WeatherDepthTrainer:
         vis_dataloaders: Optional[List[DataLoader]] = None,
     ):
         self.cfg: OmegaConf = cfg
-        self.model: MarigoldDepthPipeline = model
+        self.model = model
         self.device = device
         self.seed: Union[int, None] = (
             self.cfg.trainer.init_seed
@@ -95,7 +98,10 @@ class WeatherDepthTrainer:
         self.lambda_weather = 1.0
         
         # Adapt input layers
-        self._replace_unet_conv_in()
+        if cfg.pipeline.kwargs.use_filter:
+            self._replace_unet_conv_in_with_filter()
+        else:
+            self._replace_unet_conv_in()
 
         # Encode empty text prompt
         self.model.encode_empty_text()
@@ -181,7 +187,6 @@ class WeatherDepthTrainer:
             self.mr_noise_downscale_strategy = (
                 self.cfg.multi_res_noise.downscale_strategy
             )
-
         # Internal variables
         self.epoch = 1
         self.n_batch_in_epoch = 0  # batch index in the epoch, used when resume training
@@ -210,27 +215,25 @@ class WeatherDepthTrainer:
             self.model.unet.config["in_channels"] = 8
             logging.info(f"Unet config is updated, in_channels from 4 to 8.")
             
-        # elif self.model.unet.config["in_channels"] == 8:
-        #     # replace the first layer to accept 12 in_channels
-        #     _weight = self.model.unet.conv_in.weight.clone()  # [320, 8, 3, 3]
-        #     _bias = self.model.unet.conv_in.bias.clone()  # [320]
-        #     _weight_a, _weight_b = _weight.split(4, dim=1)  # Keep selected channel(s)
-        #     _weight_a_copy = _weight_a * 0.5
-        #     # half the activation magnitude
-        #     new_weight = torch.cat((_weight_a, _weight_a_copy, _weight_b), dim=1)
-        #     # new conv_in channel
-        #     _n_convin_out_channel = self.model.unet.conv_in.out_channels
-        #     _new_conv_in = Conv2d(
-        #         12, _n_convin_out_channel, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
-        #     )
-        #     _new_conv_in.weight = Parameter(new_weight)
-        #     _new_conv_in.bias = Parameter(_bias)
-        #     self.model.unet.conv_in = _new_conv_in
-        #     logging.info("Unet conv_in layer is replaced")
-        #     # replace config
-        #     self.model.unet.config["in_channels"] = 12
-        #     logging.info("Unet config is updated, in_channels from 8 to 12.")
-            
+        elif self.model.unet.config["in_channels"] == 8:
+            logging.info("unet.config['in_channels'] = 8, use the marigold design for feature alignment.")            
+        return
+
+    def _replace_unet_conv_in_with_filter(self):
+        if self.model.unet.config["in_channels"] == 8:
+            _weight = self.model.unet.conv_in.weight.clone()  # [320, 8, 3, 3]
+            _bias = self.model.unet.conv_in.bias.clone()  # [320]
+            self.model.unet.conv_in = SpatiallyVaryingDepthFilter(
+                c_depth=4,
+                c_guide=4,
+                ksize=3,
+                out_dim=320)
+            self.model.unet.conv_in.new_conv_in.weight = Parameter(_weight)
+            self.model.unet.conv_in.new_conv_in.bias = Parameter(_bias)
+            logging.info("Marigold `conv_in` layer is replaced with our `SpatiallyVaryingDepthFilter`.")
+        else:
+            logging.info("unet.config['in_channels'] should be 8 to use the marigold design for feature alignment.")   
+            raise NotImplementedError        
         return
     
     @staticmethod
@@ -249,9 +252,9 @@ class WeatherDepthTrainer:
         ver = self.cfg.trainer.training_version
         # 1) freeze all unet parameters
         self._set_requires_grad(self.model.unet, False)
-
         if hasattr(self.model, 'adapter'):
             self._set_requires_grad(self.model.adapter, True)
+        
         # 2) 常见子模块句柄（diffusers 的 UNet2DConditionModel 典型结构）
         #    这些属性是否存在与具体版本有关，均做了 hasattr 防护
         parts = dict([
@@ -282,7 +285,9 @@ class WeatherDepthTrainer:
             logging.info(f"Using unet encoder parameters training.")
             
         elif ver == "adapter_only":
-            # 仅训练输入侧的适配/恢复模块。若你的 RAMiT 在 UNet 之外，请按需单独启用。
+            if self.cfg.pipeline.kwargs.use_filter:
+                self._set_requires_grad(self.model.unet.conv_in, True)
+                self._set_requires_grad(self.model.unet.conv_in.new_conv_in, False)
             logging.info(f"Using restoration module parameters training.")
         else:
             raise NotImplementedError(f"Unknown training_version: {ver}")
@@ -441,6 +446,7 @@ class WeatherDepthTrainer:
                     samples = torch.cat((latent_r, image_inputs['noisy_latent']), dim=1)
                 else:
                     samples = torch.cat((image_inputs['rgb_latent'], image_inputs['noisy_latent']), dim=1)
+                # forward unet
                 model_pred = self.model.unet(
                     samples, timesteps, text_embed
                 ).sample  # Output: [B, 4, h, w]
@@ -520,10 +526,8 @@ class WeatherDepthTrainer:
                         self.save_checkpoint(ckpt_name="latest", save_train_state=True)
                         logging.info("Time is up, training paused.")
                         return
-
                     torch.cuda.empty_cache()
                     # <<< Effective batch end <<<
-
             # Epoch end
             self.n_batch_in_epoch = 0
 

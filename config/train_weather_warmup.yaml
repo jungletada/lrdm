@@ -1,15 +1,16 @@
 base_config:
 - config/logging.yaml
 - config/wandb.yaml
-- config/dataset_depth/dataset_train_kitti_warmup.yaml
+- config/dataset_depth/dataset_weather_kitti_warmup.yaml
 - config/dataset_depth/dataset_val.yaml
 - config/dataset_depth/dataset_vis.yaml
 - config/model_sdv2.yaml
 
 pipeline:
-  name: MarigoldDepthPipeline
-  phase: warmup
+  name: iGlemDepthPipeline
+  phase: warmup # only sunny weather in KITTI
   kwargs:
+    use_filter: true
     scale_invariant: true
     shift_invariant: true
     default_denoising_steps: 4

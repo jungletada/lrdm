@@ -75,7 +75,7 @@ class DepthOutput(BaseOutput):
     uncertainty: Union[None, np.ndarray]
 
 
-class LDRMDepthPipeline(DiffusionPipeline):
+class iGlemDepthPipeline(DiffusionPipeline):
     """
     Pipeline for LDRM Depth Estimation: https://marigoldcomputervision.github.io.
 
@@ -666,13 +666,13 @@ class LDRMDepthPipeline(DiffusionPipeline):
         # Encode image
         rgb_latent = self.encode_rgb(rgb_in)  # [B, 4, h, w]
         # if hasattr(self, "adapter") and self.adapter is not None:
-        rgb_latent = self.adapter(rgb_in, rgb_latent)
-        rgb_rec = self.decode_rgb(rgb_latent)  # [B, 3, H, W]
-        # clip prediction
-        rgb_rec = torch.clip(rgb_rec, -1.0, 1.0)
-        # shift to [0, 1]
-        rgb_rec = (rgb_rec + 1.0) / 2.0
-        return rgb_rec
+        res_latent = self.adapter(rgb_in, rgb_latent)
+        # rgb_rec = self.decode_rgb(rgb_latent)  # [B, 3, H, W]
+        # # clip prediction
+        # rgb_rec = torch.clip(rgb_rec, -1.0, 1.0)
+        # # shift to [0, 1]
+        # rgb_rec = (rgb_rec + 1.0) / 2.0
+        return rgb_latent, res_latent
     
     def encode_rgb(self, rgb_in: torch.Tensor) -> torch.Tensor:
         """

@@ -19,7 +19,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from diffusers import AutoencoderKL
-
+from src.util.data_loader import skip_first_batches
 from src.util.logging_util import tb_logger
 from src.util.lr_scheduler import IterExponential
 from src.util.metric import MetricTracker
@@ -29,138 +29,6 @@ try:
     SAFETENSORS_AVAILABLE = True
 except ImportError:
     SAFETENSORS_AVAILABLE = False
-
-# ==========================
-# Added: Robust + Perceptual + Distribution losses
-# ==========================
-try:
-    from lpips import LPIPS  # pip install lpips
-    _HAS_LPIPS = True
-except Exception:
-    _HAS_LPIPS = False
-
-
-class CharbonnierLoss(nn.Module):
-    """Charbonnier / Pseudo-Huber loss: sqrt((x-y)^2 + eps^2)"""
-    def __init__(self, epsilon: float = 1e-6, reduction: str = "mean"):
-        super().__init__()
-        self.eps = epsilon
-        assert reduction in ("mean", "sum", "none")
-        self.reduction = reduction
-
-    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        diff = pred - target
-        loss = torch.sqrt(diff * diff + self.eps * self.eps)
-        if self.reduction == "mean":
-            return loss.mean()
-        elif self.reduction == "sum":
-            return loss.sum()
-        else:
-            return loss
-
-
-class LPIPSLoss(nn.Module):
-    """LPIPS perceptual loss wrapper. Expects images in [-1,1]."""
-    def __init__(self, net: str = "vgg", device: torch.device = torch.device("cuda")):
-        super().__init__()
-        if not _HAS_LPIPS:
-            raise ImportError("lpips package not found. Please `pip install lpips`.\n")
-        self.lpips = LPIPS(net=net).to(device).eval()
-        for p in self.lpips.parameters():
-            p.requires_grad = False
-
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        # allow grad to flow into x (model side); LPIPS weights are frozen.
-        return self.lpips(x, y).mean()
-
-
-def kl_gaussian_diag(mu_p: torch.Tensor, logvar_p: torch.Tensor,
-                     mu_q: torch.Tensor, logvar_q: torch.Tensor,
-                     reduction: str = "mean") -> torch.Tensor:
-    """KL( N(mu_p, diag(var_p)) || N(mu_q, diag(var_q)) )."""
-    var_p = torch.exp(logvar_p)
-    var_q = torch.exp(logvar_q)
-    kl_ele = (logvar_q - logvar_p) + (var_p + (mu_p - mu_q) ** 2) / (var_q + 1e-12) - 1.0
-    kl = 0.5 * kl_ele
-    while kl.dim() > 1:
-        kl = kl.sum(dim=-1)
-    if reduction == "mean":
-        return kl.mean()
-    elif reduction == "sum":
-        return kl.sum()
-    else:
-        return kl
-
-
-def symmetric_kl_gaussian_diag(mu_a, logvar_a, mu_b, logvar_b, reduction="mean"):
-    return 0.5 * (kl_gaussian_diag(mu_a, logvar_a, mu_b, logvar_b, reduction=reduction) +
-                  kl_gaussian_diag(mu_b, logvar_b, mu_a, logvar_a, reduction=reduction))
-
-
-def psnr_from_neg1_1(pred_rgb: torch.Tensor, target_rgb: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute PSNR when inputs are in [-1,1]."""
-    pred = (pred_rgb.clamp(-1, 1) + 1.0) / 2.0
-    target = (target_rgb.clamp(-1, 1) + 1.0) / 2.0
-    mse = F.mse_loss(pred, target).clamp_min(eps)
-    psnr = -10.0 * torch.log10(mse)
-    return psnr
-
-
-class LossWeighter:
-    """
-    Iteration-based loss scheduler for staged training:
-    during the warmup window only the Charbonnier (pixel reconstruction) loss
-    is active; afterwards, LPIPS (perceptual) and KL (distribution matching)
-    are ramped in linearly up to their target maxima.
-
-    Parameters
-    ----------
-    warmup_iterations : int, default=1000
-        Number of optimizer steps for the warmup stage. During this window
-        LPIPS and KL weights are zero, so the model focuses on the Charbonnier
-        reconstruction objective to stabilize training and boost PSNR first.
-
-    ramp_iterations : int, default=1000
-        Number of optimizer steps for the linear ramp-in stage *after* warmup.
-        Over this window, the LPIPS and KL weights increase linearly from 0
-        to their respective maxima (`w_lpips_max`, `w_kl_max`). If set to 0 or
-        a negative value, both weights jump to their maxima immediately after
-        warmup.
-
-    w_char : float, default=1.0
-        Constant weight for the Charbonnier (pixel) loss; kept unchanged for
-        the whole training.
-
-    w_lpips_max : float, default=0.1
-        Target (maximum) weight for the LPIPS perceptual loss. The actual
-        LPIPS weight at a given iteration is computed by linear interpolation
-        from 0 to this value during the ramp-in stage.
-
-    w_kl_max : float, default=0.01
-        Target (maximum) weight for the KL distribution matching loss.
-        Like LPIPS, it linearly increases from 0 to this value during ramp-in.
-    """
-    def __init__(self, 
-                 warmup_iterations=1000, 
-                 ramp_iterations=1000,
-                 w_char=1.0, 
-                 w_lpips_max=0.1, 
-                 w_kl_max=0.01):
-        self.warmup_iterations = int(warmup_iterations)
-        self.ramp_iterations = int(ramp_iterations)
-        self.w_char = float(w_char)
-        self.w_lpips_max = float(w_lpips_max)
-        self.w_kl_max = float(w_kl_max)
-
-    def weights_for_iter(self, iteration: int):
-        """Return weights for the given global optimizer step (0-based)."""
-        iter_ = int(max(0, iteration))
-        if iter_ < self.warmup_iterations:
-            return self.w_char, 0.0, 0.0
-        if self.ramp_iterations <= 0:
-            return self.w_char, self.w_lpips_max, self.w_kl_max
-        t = min(1.0, (iter_ - self.warmup_iterations) / float(self.ramp_iterations))
-        return self.w_char, self.w_lpips_max * t, self.w_kl_max * t
 
 
 class LatentTrainer:
@@ -190,7 +58,7 @@ class LatentTrainer:
         self.latent_scale_factor = 0.18215
         self.vae.requires_grad_(False)
         
-        # Optimizer
+        # Optimizer !should be defined after input layer is adapted
         lr = self.cfg.lr
         self.optimizer = AdamW(self.model.parameters(), lr=lr)
 
@@ -204,32 +72,9 @@ class LatentTrainer:
             optimizer=self.optimizer, 
             lr_lambda=lr_func)
 
-        # ======= Added: build robust/perceptual/distribution losses & scheduler =======
-        self.charbonnier_loss = CharbonnierLoss(epsilon=getattr(self.cfg.trainer, 'charbonnier_eps', 1e-6))
-        if _HAS_LPIPS:
-            try:
-                self.lpips_loss = LPIPSLoss(net=getattr(self.cfg.trainer, 'lpips_net', 'vgg'), device=self.device)
-            except Exception as e:
-                logging.warning(f"LPIPS init failed, falling back to None: {e}")
-                self.lpips_loss = None
-        else:
-            logging.warning("lpips not installed. Run `pip install lpips` to enable perceptual loss.")
-            self.lpips_loss = None
-
-        self.loss_weighter = LossWeighter(
-            warmup_iterations=getattr(self.cfg.trainer, 'warmup_iterations', 1000),
-            ramp_iterations=getattr(self.cfg.trainer, 'ramp_iterations', 1000),
-            w_char=getattr(self.cfg.trainer, 'w_char', 1.0),
-            w_lpips_max=getattr(self.cfg.trainer, 'w_lpips_max', 0.1),
-            w_kl_max=getattr(self.cfg.trainer, 'w_kl_max', 0.01),
-        )
-
-        self.symmetric_kl = getattr(self.cfg.trainer, 'symmetric_kl', False)
-        # self.model_outputs_delta = getattr(self.cfg.trainer, 'model_outputs_delta', True)  # model outputs Δz by default
-
-        # Metrics
-        self.train_metrics = MetricTracker(*[
-            "loss_total", "loss_char", "loss_lpips", "loss_kl", "psnr", "w_char", "w_lpips", "w_kl"])
+        # Building Loss
+        self.smooth_l1_loss = nn.SmoothL1Loss()
+        self.train_metrics = MetricTracker(*["loss"])
     
         # Settings
         self.max_epoch = self.cfg.max_epoch
@@ -237,6 +82,7 @@ class LatentTrainer:
         self.gradient_accumulation_steps = accumulation_steps
         self.save_period = self.cfg.trainer.save_period
         self.backup_period = self.cfg.trainer.backup_period
+        self.smooth_l1_loss = nn.SmoothL1Loss()
 
         # Internal variables
         self.epoch = 1
@@ -280,58 +126,17 @@ class LatentTrainer:
                 sunny = batch['sunny_norm'].to(self.device)
                 
                 with torch.no_grad():
-                    z_w, logvar_w = self.encode_rgb(img_w)    # weather latent mean/logvar
-                    z_s, logvar_s = self.encode_rgb(sunny)    # target sunny latent mean/logvar
-                # Forward
-                mu_pred = self.model(img_w, z_w)
-                
-                # logvar_pred = None
-                # if isinstance(model_out, (tuple, list)) and len(model_out) == 2:
-                #     delta_mu, logvar_pred = model_out
-                # elif isinstance(model_out, dict):
-                #     delta_mu = model_out.get("delta_mu", model_out.get("delta", None))
-                #     logvar_pred = model_out.get("logvar", None)
-                # else:
-                #     delta_mu = model_out
+                    lnt_w, logvar_w = self.encode_rgb(img_w)    # use vae encoder to get latent
+                    # target, logvar_t = self.encode_rgb(sunny)   # use vae encoder to get latent
+                    
+                # Forward sunny and weather
+                pred_lnt = self.model(img_w, lnt_w)
+                pred_img = self.decode_rgb(pred_lnt)
+                loss = self.smooth_l1_loss(pred_img, sunny)
 
-                # if delta_mu is None:
-                #     raise RuntimeError("Model must output residual delta_mu (same shape as z_w) or (delta_mu, logvar_pred).")
-
-                # mu_pred = delta_mu  # treat as full latent directly
-
-                # Decode to image for pixel/perceptual losses
-                # pred_img = self.decode_rgb(mu_pred).clamp(-1, 1)
-
-                # ----- compose losses with staged weights -----
-                w_char, w_lpips, w_kl = self.loss_weighter.weights_for_iter(self.effective_iter)
-
-                # (1) Charbonnier in image space (optimize PSNR)
-                loss_char = self.charbonnier_loss(mu_pred, z_s)
-
-                # (2) LPIPS perceptual loss (optional)
-                if self.lpips_loss is not None and w_lpips > 0.0:
-                    loss_lpips = self.lpips_loss(mu_pred, z_s)
-                else:
-                    loss_lpips = torch.tensor(0.0, device=self.device)
-
-                # # (3) KL distribution matching in latent space (needs predicted logvar)
-                # if logvar_pred is not None and w_kl > 0.0:
-                #     if self.symmetric_kl:
-                #         loss_kl = symmetric_kl_gaussian_diag(mu_pred, logvar_pred, z_t, logvar_t, reduction="mean")
-                #     else:
-                #         loss_kl = kl_gaussian_diag(mu_pred, logvar_pred, z_t, logvar_t, reduction="mean")
-                # else:
-                #     loss_kl = torch.tensor(0.0, device=self.device)
-                loss_total = w_char * loss_char + w_lpips * loss_lpips # + w_kl * loss_kl
                 # 2) backward
-                self.train_metrics.update("loss_total", float(loss_total.detach()))
-                self.train_metrics.update("loss_char", float(loss_char.detach()))
-                self.train_metrics.update("loss_lpips", float(loss_lpips.detach()))
-                self.train_metrics.update("w_char", float(w_char))
-                self.train_metrics.update("w_lpips", float(w_lpips))
-                self.train_metrics.update("psnr", float(psnr_from_neg1_1(mu_pred.detach(), z_s.detach())))
-
-                loss = loss_total / self.gradient_accumulation_steps
+                self.train_metrics.update("loss", loss.item())
+                loss = loss / self.gradient_accumulation_steps
                 loss.backward()
                 accumulated_step += 1
                 self.n_batch_in_epoch += 1
@@ -339,17 +144,22 @@ class LatentTrainer:
 
                 # Perform optimization step
                 if accumulated_step >= self.gradient_accumulation_steps:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     self.optimizer.step()
                     self.lr_scheduler.step()
-                    self.optimizer.zero_grad(set_to_none=True)
+                    self.optimizer.zero_grad()
                     accumulated_step = 0
 
                     self.effective_iter += 1
 
                     # Log to tensorboard
-                    logs = {f"train/{k}": v for k, v in self.train_metrics.result().items()}
-                    tb_logger.log_dict(logs, global_step=self.effective_iter)
+                    accumulated_loss = self.train_metrics.result()["loss"]
+                    tb_logger.log_dict(
+                        {
+                            f"train/{k}": v
+                            for k, v in self.train_metrics.result().items()
+                        },
+                        global_step=self.effective_iter,
+                    )
                     tb_logger.writer.add_scalar(
                         "lr",
                         self.lr_scheduler.get_last_lr()[0],
@@ -361,12 +171,7 @@ class LatentTrainer:
                         global_step=self.effective_iter,
                     )
                     logging.info(
-                        f"iter {self.effective_iter:5d} (epoch {epoch:2d}): "
-                        f"L={self.train_metrics.result()['loss_total']:.5f} | "
-                        f"Char={self.train_metrics.result()['loss_char']:.5f} | "
-                        f"LPIPS={self.train_metrics.result()['loss_lpips']:.5f} | "
-                        f"PSNR={self.train_metrics.result()['psnr']:.2f}dB | "
-                        f"w=[{w_char:.2f}, {w_lpips:.2f},]"
+                        f"iter {self.effective_iter:5d} (epoch {epoch:2d}): loss={accumulated_loss:.5f}"
                     )
                     self.train_metrics.reset()
 
@@ -393,8 +198,48 @@ class LatentTrainer:
 
             # Epoch end
             self.n_batch_in_epoch = 0
+            
+                # # 3) SupCon（多正样本；同一 scene_id 视为正样本集合）
+                # #   SupCon 参考：Khosla et al., NeurIPS 2020:contentReference[oaicite:3]{index=3}
+                # assert scene_ids.dtype == torch.long and scene_ids.dim() == 1 and scene_ids.size(0) == batch_size
+                # Z_list = [gap(Tss)] + [gap(Tsw) for Tsw in Tsw_list]   # (m+1) 个 [B, D]
+                # Z = torch.cat(Z_list, dim=0)                           # [(m+1)*B, D]
+                # G = scene_ids.repeat(num_domains + 1)                            # [(m+1)*B]
+                # L_supcon = supcon_loss(Z, G, temperature=0.1)
 
-    @torch.no_grad()
+        #         # 4) 组内一致（方差，鼓励多风格输出坍缩到同一语义）
+        #         stacked = torch.stack([gap(Tsw) for Tsw in pred_weathers], dim=0)  # [m, B, D]
+        #         L_var = stacked.var(dim=0, unbiased=False).mean()             # 标量
+
+        #         # 5) 多源 CORAL（坏天气→晴天，二阶统计对齐；Deep CORAL:contentReference[oaicite:4]{index=4}）
+        #         L_coral = coral_multi_to_sunny(pred_sunny, pred_weathers)
+
+        #         # 6) PatchGAN 多类域对抗（K+1 域；PatchGAN 思想来自 pix2pix:contentReference[oaicite:5]{index=5}）
+        #         #    若 D 内部接了 GRL，则生成端的对抗项就是下面的 CE；若未接 GRL，可用 L_adv = -L_D。
+        #         logits_s = self.discriminator(pred_sunny)   # 晴域 logits: [B, C_dom, h', w']
+        #         logits_w = [self.discriminator(pred_wtr) for pred_wtr in pred_weathers]       # 各坏天气域 logits
+                
+        #         # 约定 domain 索引：晴=0；每种坏天气依次 1..m
+        #         sunny_id = 0
+        #         domain_ids = list(range(1, num_domains + 1))
+        #         L_discrinative = ce_patch(logits_s, sunny_id) + torch.stack([
+        #             ce_patch(lw, domain_ids[j]) for j, lw in enumerate(logits_w)
+        #         ]).mean()
+
+        #         use_grl = True  # 如果 D 或连接到 D 的桥里实现了 GRL，就置 True
+        #         L_adv = L_discrinative if use_grl else (-L_discrinative)
+
+        #         # 7) 总损失
+        #         L = lam1 * L_idendity + lam2 * L_reconstruct + lam3 * L_supcon + lam4 * L_var + lam5 * L_coral + lam6 * L_adv
+
+        # # 你也可以返回一个 dict 便于 log
+        # logs = {
+        #     "L": L, "L_id": L_idendity, "L_rec": L_reconstruct, "L_supcon": L_supcon,
+        #     "L_var": L_var, "L_coral": L_coral, "L_adv": L_adv, "L_D": L_discrinative
+        # }
+        # return L, logs
+
+    @torch.no_grad
     def encode_rgb(self, rgb_in: torch.Tensor) -> torch.Tensor:
         """
         Encode RGB image into latent.
@@ -455,7 +300,7 @@ class LatentTrainer:
             logging.debug(f"Old checkpoint is backed up at: {temp_ckpt_dir}")
         
         # Save safetensors
-        adapter_path = os.path.join(ckpt_dir)
+        adapter_path = os.path.join(ckpt_dir, self.save_name)
         self.model.save_pretrained(adapter_path, safe_serialization=True)
         logging.info(f"Model is saved to: {adapter_path}")
 
@@ -495,6 +340,7 @@ class LatentTrainer:
         if _model_path.endswith('.safetensors'):
             if not SAFETENSORS_AVAILABLE:
                 raise ImportError("safetensors library is required to load .safetensors files")
+            
             # Load using safetensors
             state_dict = {}
             with safe_open(_model_path, framework="pt", device='cpu') as f:
@@ -502,7 +348,7 @@ class LatentTrainer:
                     state_dict[key] = f.get_tensor(key)
         else:
             # Load using torch.load for .bin files
-            state_dict = torch.load(_model_path, map_location='cpu', weights_only=True)
+            state_dict = torch.load(_model_path, map_location='cpu')
         
         self.model.load_state_dict(state_dict)
         self.model.to(self.device)
@@ -514,14 +360,14 @@ class LatentTrainer:
             self.effective_iter = checkpoint["effective_iter"]
             self.epoch = checkpoint["epoch"]
             self.n_batch_in_epoch = checkpoint["n_batch_in_epoch"]
-            self.in_evaluation = checkpoint.get("in_evaluation", False)
+            self.in_evaluation = checkpoint["in_evaluation"]
             self.global_seed_sequence = checkpoint["global_seed_sequence"]
 
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             logging.info(f"optimizer state is loaded from {ckpt_path}")
 
             if resume_lr_scheduler:
-                self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])  # type: ignore
+                self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
                 logging.info(f"LR scheduler state is loaded from {ckpt_path}")
 
         logging.info(
@@ -550,5 +396,118 @@ class LatentTrainer:
         ):
             self.save_checkpoint(ckpt_name="latest", save_train_state=True)
 
-    # (Optional) keep your original train_base intact; not modified here.
-    # train_base removed as requested; use `train()` which includes staged losses.
+    def train_base(self, t_end=None):
+        logging.info("Start training")
+
+        device = self.device
+        self.model.to(device)
+
+        if self.in_evaluation:
+            logging.info(
+                "Last evaluation was not finished, will do evaluation before continue training."
+            )
+
+        self.train_metrics.reset()
+        accumulated_step = 0
+
+        for epoch in range(self.epoch, self.max_epoch + 1):
+            self.epoch = epoch
+            logging.debug(f"epoch: {self.epoch}")
+
+            # Skip previous batches when resume
+            for batch in skip_first_batches(self.train_loader, self.n_batch_in_epoch):
+                self.model.train()
+
+                # globally consistent random generators
+                if self.seed is not None:
+                    local_seed = self._get_next_seed()
+                    rand_num_generator = torch.Generator(device=device)
+                    rand_num_generator.manual_seed(local_seed)
+                else:
+                    rand_num_generator = None
+
+                # >>> With gradient accumulation >>>
+
+                # Load data with "input_latent" and "target_latent"
+                rgb_latent = batch["input_latent"].to(device)
+                rgb_image = batch["rgb_norm"].to(device)
+                target = batch["target_latent"].to(device)
+                
+                model_pred = self.model(rgb_image, rgb_latent)  # [B, 4, h, w]
+                
+                if torch.isnan(model_pred).any():
+                    logging.warning("model_pred contains NaN.")
+                    exit(0)
+
+                loss = self.smooth_l1_loss(model_pred, target)
+                # charbonnier_loss = self.charbonnier_loss(model_pred, target)
+                # ssim_loss = self.ssim_loss(model_pred, target)
+                # loss = 2 * smooth_l1_loss + charbonnier_loss + ssim_loss
+                
+                # self.train_metrics.update("smooth_l1_loss", smooth_l1_loss.item())
+                # self.train_metrics.update("charbonnier_loss", charbonnier_loss.item())
+                # self.train_metrics.update("ssim_loss", ssim_loss.item())
+                self.train_metrics.update("loss", loss.item())
+                loss = loss / self.gradient_accumulation_steps
+                loss.backward()
+
+                accumulated_step += 1
+                self.n_batch_in_epoch += 1
+                # Practical batch end
+
+                # Perform optimization step
+                if accumulated_step >= self.gradient_accumulation_steps:
+                    self.optimizer.step()
+                    self.lr_scheduler.step()
+                    self.optimizer.zero_grad()
+                    accumulated_step = 0
+
+                    self.effective_iter += 1
+
+                    # Log to tensorboard
+                    accumulated_loss = self.train_metrics.result()["loss"]
+                    tb_logger.log_dict(
+                        {
+                            f"train/{k}": v
+                            for k, v in self.train_metrics.result().items()
+                        },
+                        global_step=self.effective_iter,
+                    )
+                    tb_logger.writer.add_scalar(
+                        "lr",
+                        self.lr_scheduler.get_last_lr()[0],
+                        global_step=self.effective_iter,
+                    )
+                    tb_logger.writer.add_scalar(
+                        "n_batch_in_epoch",
+                        self.n_batch_in_epoch,
+                        global_step=self.effective_iter,
+                    )
+                    logging.info(
+                        f"iter {self.effective_iter:5d} (epoch {epoch:2d}): loss={accumulated_loss:.5f}"
+                    )
+                    self.train_metrics.reset()
+
+                    # Per-step callback
+                    self._train_step_callback()
+
+                    # End of training
+                    if self.max_iter > 0 and self.effective_iter >= self.max_iter:
+                        self.save_checkpoint(
+                            ckpt_name=self._get_backup_ckpt_name(),
+                            save_train_state=False,
+                        )
+                        logging.info("Training ended.")
+                        return
+                    
+                    # Time's up
+                    elif t_end is not None and datetime.now() >= t_end:
+                        self.save_checkpoint(ckpt_name="latest", save_train_state=True)
+                        logging.info("Time is up, training paused.")
+                        return
+
+                    torch.cuda.empty_cache()
+                    # <<< Effective batch end <<<
+
+            # Epoch end
+            self.n_batch_in_epoch = 0

@@ -31,6 +31,7 @@ import os
 import sys
 import argparse
 import logging
+from typing import Optional
 from PIL import Image
 import numpy as np
 from omegaconf import OmegaConf
@@ -49,7 +50,7 @@ from marigold import MarigoldDepthPipeline
 from marigold import LDRMDepthPipeline
 
 from src.dataset import (
-    BaseDepthDataset,
+    WeatherKITTILatentGroupedDataset,
     DatasetMode,
     get_dataset,
     get_pred_name,
@@ -212,6 +213,28 @@ def get_pipeline(args):
     
     return pipeline
       
+
+def _psnr_per_channel(x: torch.Tensor, y: torch.Tensor, data_range: Optional[float] = None, eps: float = 1e-12):
+    """
+    x, y: shape [N, C, H, W] (本例 N=1, C=4)
+    返回: (psnr_per_channel[C], psnr_mean[1])
+    """
+    assert x.shape == y.shape and x.dim() == 4, f"Expect [N,C,H,W], got {x.shape} vs {y.shape}"
+    # 自动估计动态范围（可改成固定 1.0 或 255.0）
+    if data_range is None:
+        x_min = torch.amin(x)
+        y_min = torch.amin(y)
+        x_max = torch.amax(x)
+        y_max = torch.amax(y)
+        data_range = (torch.maximum(x_max, y_max) - torch.minimum(x_min, y_min)).item()
+        if data_range == 0:
+            data_range = 1.0  # 退化情况避免除零
+
+    # 每通道 MSE：对 N, H, W 取均值，保留 C
+    mse = torch.mean((x - y) ** 2, dim=(0, 2, 3))  # shape [C]
+    psnr_c = 10.0 * torch.log10((data_range ** 2) / (mse + eps))  # shape [C]
+    return psnr_c, psnr_c.mean()
+
     
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
@@ -289,14 +312,7 @@ if "__main__" == __name__:
     # -------------------- Data --------------------
     cfg_data = OmegaConf.load(dataset_config)
 
-    dataset: BaseDepthDataset = get_dataset(
-        cfg_data, 
-        base_data_dir=base_data_dir, 
-        mode=DatasetMode.EVAL,
-        join_split=False,
-    )
-    assert isinstance(dataset, BaseDepthDataset)
-    
+    dataset = WeatherKITTILatentGroupedDataset()
     dataloader = DataLoader(dataset, batch_size=1, num_workers=0)
 
     # -------------------- Model --------------------
@@ -328,25 +344,46 @@ if "__main__" == __name__:
     )
 
     # -------------------- Inference and saving --------------------
+    domains = ['raingan', 'snowgan', 'fog1', 'rain', 'snow', 'fog2']
     with torch.no_grad():
-        for batch in tqdm(
-            dataloader, desc=f"Depth Inference on {dataset.disp_name}", leave=True
-        ):
-            input_image = batch["rgb_norm"]
+        for batch in tqdm(dataloader, desc=f"Depth Inference on {dataset.disp_name}", leave=True):
+            sunny_image = batch["sunny_image"].to(device)
             rgb_filename = batch["rgb_relative_path"][0]
-            if rgb_filename.__contains__('rgb'):
-                sunny_latent = pipeline.encode_rgb(input_image)
-            
-            # Save predictions
+
+            sunny_latent, res_latent_sunny = pipeline.reconstruct_rgb(sunny_image)
+
+            # 1) sunny_latent vs res_latent_sunny
+            psnr_c, psnr_avg = _psnr_per_channel(sunny_latent, res_latent_sunny)
+            print(f"[1] sunny vs res_sunny: PSNR per-channel = {psnr_c.tolist()}, mean = {psnr_avg.item():.4f} dB")
+
             rgb_basename = os.path.basename(rgb_filename)
             scene_dir = os.path.join(output_dir, os.path.dirname(rgb_filename))
-            
-            if not os.path.exists(scene_dir):
-                os.makedirs(scene_dir)
-            
-            save_to = os.path.join(scene_dir, rgb_basename)
-            if os.path.exists(save_to):
-                logging.warning(f"Existing file: '{save_to}' will be overwritten")
-            
-            rgb_out = pipe_output.detach().cpu()
-            save_image(rgb_out, save_to)
+
+            for i, weather_image in enumerate(batch["weather_image"]):
+                weather_image = weather_image.to(device)
+                rgb_latent, res_latent_weather = pipeline.reconstruct_rgb(weather_image)
+                # 2) sunny_latent vs rgb_latent（列表）
+                if isinstance(rgb_latent, (list, tuple)):
+                    for i, t in enumerate(rgb_latent):
+                        psnr_c, psnr_avg = _psnr_per_channel(sunny_latent, t)
+                        print(f"[2] {domains[i]} sunny vs rgb_latent[{i}]: PSNR per-channel = {psnr_c.tolist()}, mean = {psnr_avg.item():.4f} dB")
+                else:
+                    # 如果 pipeline 返回的不是列表，兼容单张
+                    psnr_c, psnr_avg = _psnr_per_channel(sunny_latent, rgb_latent)
+                    print(f"[2] {domains[i]} sunny vs rgb_latent: PSNR per-channel = {psnr_c.tolist()}, mean = {psnr_avg.item():.4f} dB")
+
+                # 3) sunny_latent vs res_latent_weather（列表）
+                if isinstance(res_latent_weather, (list, tuple)):
+                    for i, t in enumerate(res_latent_weather):
+                        psnr_c, psnr_avg = _psnr_per_channel(sunny_latent, t)
+                        print(f"[3] {domains[i]} sunny vs res_latent_weather[{i}]: PSNR per-channel = {psnr_c.tolist()}, mean = {psnr_avg.item():.4f} dB")
+                else:
+                    psnr_c, psnr_avg = _psnr_per_channel(sunny_latent, res_latent_weather)
+                    print(f"[3] {domains[i]} sunny vs res_latent_weather: PSNR per-channel = {psnr_c.tolist()}, mean = {psnr_avg.item():.4f} dB")
+                
+            break  
+            # if not os.path.exists(scene_dir):
+            #     os.makedirs(scene_dir)
+            # save_to = os.path.join(scene_dir, rgb_basename)
+            # if os.path.exists(save_to):
+            #     logging.warning(f"Existing file: '{save_to}' will be overwritten")

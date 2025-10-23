@@ -39,8 +39,7 @@ class WeatherKITTILatentDataset(Dataset):
         self.rgb_latent = [os.path.join(self.rgb_path, filename_line[0][11:].replace('.png', '.npy'))
                           for filename_line in self.filenames]
         
-        self.target_latent = self.rgb_latent.copy()
-        self.target_latent = self.target_latent * (self.weather_opt.num_domains + 1)
+        self.target_latent = self.rgb_latent.copy() * (self.weather_opt.num_domains + 1)
         self.get_image_file_path()
         self.get_latent_file_path()
 
@@ -138,7 +137,7 @@ class WeatherKITTILatentDataset(Dataset):
         return out
 
     def __len__(self):
-        return len(self.mix_latent)
+        return len(self.mix_image)
     
     def _get_data_path(self, index):
         latent_rel_path = self.mix_latent[index]
@@ -150,16 +149,13 @@ class WeatherKITTILatentDataset(Dataset):
     def __getitem__(self, index):
         rgb_rel_path, target_rel_path, image_rel_path, sunny_rel_path = self._get_data_path(index=index)
         sample =  {"index": index, "rgb_relative_path": rgb_rel_path}
-        
-        latent = np.load(os.path.join(self.base_path, rgb_rel_path))
-        target = np.load(os.path.join(self.base_path, target_rel_path))
-            
-        latent  = torch.from_numpy(latent).squeeze()
-        target = torch.from_numpy(target).squeeze()
+        # latent = np.load(os.path.join(self.base_path, rgb_rel_path))
+        # target = np.load(os.path.join(self.base_path, target_rel_path))
+        # latent  = torch.from_numpy(latent).squeeze()
+        # target = torch.from_numpy(target).squeeze()
         
         rgb_path = os.path.join(self.image_path, image_rel_path)
         rgb_data = self._load_rgb_data(rgb_path)
-        # rgb_int = rgb_data["rgb_int"]
         rgb_norm = rgb_data["rgb_norm"]
 
         sunny_path = os.path.join(self.image_path, sunny_rel_path)
@@ -167,14 +163,9 @@ class WeatherKITTILatentDataset(Dataset):
         sunny_norm = sunny_data["rgb_norm"]
 
         if np.random.rand() < self.flip_rate:
-            # latent = latent.flip(dims=[-1])
-            # target = target.flip(dims=[-1])
-            # rgb_int = rgb_int.flip(dims=[-1])
             rgb_norm = rgb_norm.flip(dims=[-1])
             sunny_norm = sunny_norm.flip(dims=[-1])
-        # sample["input_latent"] = latent
-        # sample["target_latent"] = target
-        # sample["rgb_int"] = rgb_int
+     
         sample["rgb_norm"] = rgb_norm
         sample['sunny_norm'] = sunny_norm
         return sample
@@ -188,6 +179,7 @@ class WeatherKITTILatentGroupedDataset(WeatherKITTILatentDataset):
                  flip_rate=0.5):
         super().__init__(filename_ls_path, base_path, image_path, flip_rate)
         # the order is important.
+        self.disp_name = 'Weather KITTI  Grouped Dataset'
         self.domains = ['sunny', 'raingan', 'snowgan', 'fog1', 'rain', 'snow', 'fog2']
         
     def __len__(self):

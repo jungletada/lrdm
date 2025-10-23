@@ -8,13 +8,13 @@ augmentation:
 
 dataloader:
   num_workers: 8
-  effective_batch_size: 32
-  max_train_batch_size: 4
+  effective_batch_size: 30
+  max_train_batch_size: 30
   seed: 3047  # to ensure continuity when resuming from checkpoint
 
 model:
-  dim: 64
-  depths: [6, 4, 4, 6]
+  dim: 24
+  depths: [2, 4, 4, 2]
   num_heads: [4, 4, 4, 4]
 
 trainer:
@@ -24,9 +24,13 @@ trainer:
   init_seed: 3047  # use null to train w/o seeding
   save_period: 2000
   backup_period: 2000
+  charbonnier_eps: 1e-6
+  lpips_net: vgg
+  warmup_iterations: 1000
+  ramp_iterations: 1000
 
 max_epoch: 10000  # a large enough number
-max_iter: 2000   # usually converges at around 80k
+max_iter: 40000   # usually converges at around 80k
 
 optimizer:
   name: AdamW
@@ -35,6 +39,6 @@ lr: 1e-03
 lr_scheduler:
   name: IterExponential
   kwargs:
-    total_iter: 2000
+    total_iter: 40000
     final_ratio: 0.005
-    warmup_steps: 10
+    warmup_steps: 100

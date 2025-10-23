@@ -37,8 +37,8 @@ from .marigold_normals_pipeline import (
     MarigoldNormalsPipeline,  # noqa: F401
     MarigoldNormalsOutput,  # noqa: F401
 )
-from .ldrm_pipeline import (
-    LDRMDepthPipeline,
+from .igled_pipeline import (
+    iGlemDepthPipeline,
     DepthOutput
 )
 

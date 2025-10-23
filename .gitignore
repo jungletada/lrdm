@@ -4,6 +4,8 @@
 /data
 /input
 /output
+/output_iGlemd
+/output*
 /temp
 /wandb
 /venv

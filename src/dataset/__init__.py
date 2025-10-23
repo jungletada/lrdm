@@ -55,6 +55,8 @@ from .sintel_dataset import SintelNormalsDataset
 from .vkitti_dataset import VirtualKITTIDepthDataset
 from .weatherkitti_dataset import \
     WeatherKITTIDepthMixedDataset, KITTIDepthDataset
+from .kitti_latent_dataset import  WeatherKITTILatentGroupedDataset
+
 
 dataset_name_class_dict = {
     "hypersim_depth": HypersimDepthDataset,
@@ -76,7 +78,7 @@ dataset_name_class_dict = {
     "hypersim_iid": HypersimIIDDataset,
     "weather_depth_kitti": WeatherKITTIDepthMixedDataset,
     "weather_depth_kitti_eval": WeatherKITTIDepthMixedDataset,
-    "depth_kitti": KITTIDepthDataset,
+    "weather_kitti":  WeatherKITTILatentGroupedDataset
 }
 
 
@@ -114,6 +116,7 @@ def get_dataset(
         )
     
     else:
+        print(f"{cfg_data_split.name} is not implemented.")
         raise NotImplementedError
 
     return dataset

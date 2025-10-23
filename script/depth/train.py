@@ -29,7 +29,6 @@
 # --------------------------------------------------------------------------
 
 from ast import arg
-from sqlite3 import adapters
 import sys
 import os
 from webbrowser import get
@@ -51,6 +50,7 @@ from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from marigold import MarigoldDepthPipeline
+from marigold import iGlemDepthPipeline
 from src.dataset import BaseDepthDataset, DatasetMode, get_dataset
 from src.dataset.mixed_sampler import MixedBatchSampler
 from src.trainer import get_trainer_cls
@@ -382,19 +382,19 @@ if "__main__" == __name__:
     # snapshot_download("stabilityai/stable-diffusion-2", local_dir=sd_model_path)
     adapter = get_model(model_type=args.model_type)
     if cfg.pipeline.phase == 'warmup':
-        pipeline = MarigoldDepthPipeline.from_pretrained(
+        pipeline = iGlemDepthPipeline.from_pretrained(
             base_ckpt_dir, 
             adapter=adapter, # you can set 'adapter=None'
             **_pipeline_kwargs
         )
-    elif cfg.pipeline.phase == 'weather':
+    elif cfg.pipeline.phase == 'finetune':
         vae = AutoencoderKL.from_pretrained(base_ckpt_dir, subfolder="vae")
         scheduler = DDIMScheduler.from_pretrained(base_ckpt_dir, subfolder="scheduler")
         text_encoder = CLIPTextModel.from_pretrained(base_ckpt_dir, subfolder="text_encoder")
         tokenizer = CLIPTokenizer.from_pretrained(base_ckpt_dir, subfolder="tokenizer")
         unet = UNet2DConditionModel.from_pretrained(cfg.warmup_path, subfolder="unet")
         adapter = RAMiTCond.from_pretrained(cfg.warmup_path, subfolder="adapter")
-        pipeline = MarigoldDepthPipeline(
+        pipeline = iGlemDepthPipeline(
             unet=unet,
             vae=vae,
             scheduler=scheduler,

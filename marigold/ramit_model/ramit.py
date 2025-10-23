@@ -647,6 +647,7 @@ class RAMiTCond(nn.Module):
         self.hidden_ratio = hidden_ratio
         self.qkv_bias = qkv_bias
         self.act_layer = act_layer
+        
         norm_layer = ReshapeLayerNorm if norm_layer == 'ReshapeLayerNorm' else norm_layer
         self.norm_layer = norm_layer = ReshapeLayerNorm if norm_layer == 'ReshapeLayerNorm' else norm_layer
         self.tail_mv = tail_mv
@@ -676,7 +677,7 @@ class RAMiTCond(nn.Module):
 
         # For ablation study
         self.residual = CondConvResidual(lnt_dim=input_dim, dim=dim)
-        
+
         self.register_buffer("_dtype_helper",
                              torch.zeros((), dtype=torch.float32, device="cpu"),
                              persistent=False)
@@ -700,11 +701,10 @@ class RAMiTCond(nn.Module):
         # 1) save config
         cfg = {
             "input_dim": self.in_channels,
-            "depths": self.depths,
+            "depths": list(self.depths) if hasattr(self.depths, '__iter__') else self.depths,
             "dim": self.dim,
             "head_dim": self.head_dim,
             "window_size": self.window_size,
-            "_class_name": self.__class__.__name__,
         }
         with open(os.path.join(save_directory, "config.json"), "w") as f:
             json.dump(cfg, f, indent=2)
@@ -768,7 +768,7 @@ class RAMiTCond(nn.Module):
         o5 = o4 + x_lnt
         residual = self.residual(x_img, o5)
         rs_latent = rgb_latent + residual
-        
+
         return rs_latent
     
     def _init_weights(self, m):

@@ -48,7 +48,7 @@ def get_args():
     )
     parser.add_argument(
         "--resume_run",
-        action="store",
+        action="store", 
         default=None,
         help="Path of checkpoint to be resumed. If given, will ignore --config, and checkpoint in the config.",
     )

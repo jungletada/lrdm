@@ -3,31 +3,10 @@ set -e
 set -x
 
 # Use specified checkpoint path, otherwise, default value
-finetune_ckpt=${1:-"output/train_weather_finetune/checkpoint/latest"}
+finetune_ckpt=${1:-"output/train_weather_finetune_adapter_only/checkpoint/latest"}
 output_child_dir=${2:-"adapter_only"}
 
-# python script/depth/infer.py \
-#     --base_checkpoint checkpoint/marigold-depth-v1-1 \
-#     --seed 2026 \
-#     --base_data_dir data/kitti \
-#     --denoise_steps 2 \
-#     --ensemble_size 1 \
-#     --processing_res 0 \
-#     --dataset_config config/dataset_depth/data_kitti_eigen_test.yaml \
-#     --output_dir output/eval/kitti_eigen_test/${output_child_dir} \
-#     --version restore \
-#     --finetune_checkpoint ${finetune_ckpt} \
-
-
-# python script/depth/eval.py \
-#     --base_data_dir data/kitti \
-#     --dataset_config config/dataset_depth/data_kitti_eigen_test.yaml \
-#     --alignment least_square \
-#     --prediction_dir output/eval/kitti_eigen_test/${output_child_dir} \
-#     --output_dir output/eval/kitti_eigen_test/eval_metric
-
-
-python script/depth/infer_adapter.py \
+python script/depth/infer.py \
     --base_checkpoint checkpoint/marigold-depth-v1-1 \
     --seed 2026 \
     --base_data_dir data/kitti \
@@ -35,6 +14,28 @@ python script/depth/infer_adapter.py \
     --ensemble_size 1 \
     --processing_res 0 \
     --dataset_config config/dataset_depth/data_kitti_eigen_test.yaml \
-    --output_dir output/eval/kitti_eigen_test/reconstruct \
+    --output_dir output/eval/kitti_eigen_test/${output_child_dir} \
     --version restore \
     --finetune_checkpoint ${finetune_ckpt} \
+
+
+python script/depth/eval.py \
+    --base_data_dir data/kitti \
+    --dataset_config config/dataset_depth/data_kitti_eigen_test.yaml \
+    --alignment least_square \
+    --prediction_dir output/eval/kitti_eigen_test/${output_child_dir} \
+    --output_dir output/eval/kitti_eigen_test/eval_metric
+
+
+# python script/depth/infer_adapter.py \
+#     --base_checkpoint checkpoint/marigold-depth-v1-1 \
+#     --seed 2026 \
+#     --base_data_dir data/kitti \
+#     --denoise_steps 2 \
+#     --ensemble_size 1 \
+#     --processing_res 0 \
+#     --dataset_config config/dataset_depth/data_weather_kitti.yaml \
+#     --output_dir output/eval/kitti_eigen_test/reconstruct \
+#     --version restore \
+#     --finetune_checkpoint ${finetune_ckpt} \
+#     --ramit_checkpoint output/train_rasmit_latent/checkpoint/iter_080000/ramit.pth

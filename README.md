@@ -143,9 +143,9 @@ Resume from a checkpoint, e.g.:
 python script/depth/train.py --resume_run output/train_weather_depth_${version}/checkpoint/latest
 ```
 
-----------------
+<!-- ----------------
 
-<!-- ### Training using latent adapter
+### Training using latent adapter
 Run training script for latent adapter
 ```bash
 python script/depth/train_latent.py --config config/train_latent_adapter.yaml
