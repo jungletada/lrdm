@@ -108,6 +108,13 @@ bash script/depth/infer_eval_kitti.sh \
   output/train_weather_finetune_${version}/checkpoint/latest \
   ${version}
 ```
+For example:
+```bash
+bash script/depth/infer_eval_kitti.sh \
+  output/train_weather_finetune_adapter_only/checkpoint/latest \
+  adapter_only
+```
+
 Note: although the seed has been set, the results might still be slightly different on different hardware.
  
 ## 🏋️ Training

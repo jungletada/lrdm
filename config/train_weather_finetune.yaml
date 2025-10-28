@@ -31,13 +31,13 @@ augmentation:
 dataloader:
   num_workers: 2
   effective_batch_size: 32
-  seed: 2025  # to ensure continuity when resuming from checkpoint
+  seed: 5432  # to ensure continuity when resuming from checkpoint
 
 trainer:
   name: WeatherRAMDepthTrainer
   training_noise_scheduler:
     pretrained_path: marigold-depth-v1-1
-  init_seed: 2025  # use null to train w/o seeding
+  init_seed: 5432  # use null to train w/o seeding
   save_period: 1000
   backup_period: 2000
   validation_period: 500
@@ -62,14 +62,14 @@ loss:
   kwargs:
     reduction: mean
 
-lr: 2.0e-05
+lr: 3.0e-05
 lr_scheduler:
   name: IterExponential
   kwargs:
     total_iter: 20000
     final_ratio: 0.01
     warmup_steps: 200
-weight_decay: 1.0e-2
+weight_decay: 0
 head_lr_mult: 1.0
 
 # Light setting for the in-training validation and visualization
@@ -81,7 +81,7 @@ validation:
   resample_method: bilinear
   main_val_metric: abs_relative_difference
   main_val_metric_goal: minimize
-  init_seed: 3047
+  init_seed: 5432
 
 eval:
   alignment: least_square

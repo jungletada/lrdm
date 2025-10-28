@@ -44,6 +44,7 @@ from datetime import datetime, timedelta
 
 import torch
 from torch.utils.data import ConcatDataset, DataLoader
+from safetensors.torch import load_file
 from huggingface_hub import hf_hub_download
 from huggingface_hub import snapshot_download
 from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler
@@ -72,6 +73,7 @@ from src.util.logging_util import (
 )
 from src.util.slurm_util import get_local_scratch_dir, is_on_slurm
 from marigold.ramit_model.ramit import RAMiTCond, get_model
+from marigold.ramit_model.depth_filter import SpatiallyVaryingDepthFilter
 
 
 def get_args():
@@ -392,8 +394,15 @@ if "__main__" == __name__:
         scheduler = DDIMScheduler.from_pretrained(base_ckpt_dir, subfolder="scheduler")
         text_encoder = CLIPTextModel.from_pretrained(base_ckpt_dir, subfolder="text_encoder")
         tokenizer = CLIPTokenizer.from_pretrained(base_ckpt_dir, subfolder="tokenizer")
-        unet = UNet2DConditionModel.from_pretrained(cfg.warmup_path, subfolder="unet")
         adapter = RAMiTCond.from_pretrained(cfg.warmup_path, subfolder="adapter")
+        # Modified UNet conv_in
+        unet_cfg = UNet2DConditionModel.load_config(cfg.warmup_path, subfolder="unet")
+        unet = UNet2DConditionModel.from_config(unet_cfg)
+        unet.conv_in = SpatiallyVaryingDepthFilter(c_depth=4, c_guide=4, ksize=3, out_dim=320)
+        unet_path_st = os.path.join(cfg.warmup_path, "unet", "diffusion_pytorch_model.safetensors")
+        state_dict = load_file(unet_path_st, device="cpu")
+        unet.load_state_dict(state_dict)
+        # load pipeline
         pipeline = iGlemDepthPipeline(
             unet=unet,
             vae=vae,

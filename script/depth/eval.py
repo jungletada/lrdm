@@ -156,7 +156,7 @@ def save_filled_depth(args, valid_mask, depth_raw, pred_name, depth_pred):
     Image.fromarray((aligned_depth * 256.0).astype(np.uint16)).save(aligned_depth_png_path)
     
 
-def save_prediction_heatmap(args, depth_pred, depth_raw, pred_name):
+def save_prediction_heatmap(args, depth_pred, depth_raw, pred_name, save_label=False):
     """
         Save predicted and ground truth depth as heatmaps
     """
@@ -178,12 +178,11 @@ def save_prediction_heatmap(args, depth_pred, depth_raw, pred_name):
         plt.close()
 
     pred_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_pred.png'))
-    gt_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_gt.png'))
-    save_heatmap(depth_pred, 
-                 pred_heatmap_path)
+    save_heatmap(depth_pred, pred_heatmap_path)
     # depth_raw can be a NumPy array already; avoid relying on external device state
-    save_heatmap(depth_raw.squeeze(), 
-                 gt_heatmap_path)
+    if save_label:
+        gt_heatmap_path = os.path.join(args.output_dir, pred_name.replace('.npy', '_gt.png'))
+        save_heatmap(depth_raw.squeeze(), gt_heatmap_path)
     
     
 if "__main__" == __name__:
@@ -287,7 +286,7 @@ if "__main__" == __name__:
         depth_pred_ts = torch.from_numpy(depth_pred).to(device)
         
         # save_filled_depth(args, valid_mask, depth_raw, pred_name)
-        # save_prediction_heatmap(args, depth_pred, depth_raw, pred_name)
+        save_prediction_heatmap(args, depth_pred, depth_raw, pred_name, save_label=True)
 
         for met_func in metric_funcs:
             _metric_name = met_func.__name__

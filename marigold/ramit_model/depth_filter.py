@@ -24,7 +24,7 @@ class SpatiallyVaryingDepthFilter(nn.Module):
 
         # weight generator: predicts (C_depth * K*K) logits per pixel
         self.weight_gen = nn.Conv2d(c_guide, c_depth * ksize * ksize, kernel_size=1)
-        self.new_conv_in = nn.Conv2d(c_depth * 2, out_dim, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        self.new_conv_in = nn.Conv2d(c_depth, out_dim, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
         self.reset_parameters_identity()
 
     def reset_parameters_identity(self):
@@ -53,7 +53,9 @@ class SpatiallyVaryingDepthFilter(nn.Module):
         patches = patches.view(B, C, self.ksize*self.ksize, H, W)
 
         # 3) weighted sum over K*K
-        y = (patches * k).sum(dim=2)   # (B, C, H, W)
-        y = torch.cat((guide, y), dim=1)
+        y_depth = (patches * k).sum(dim=2)   # (B, C, H, W)
+        
+        y = torch.cat((guide, y_depth), dim=1)
         y = self.new_conv_in(y)
+        # y = self.new_conv_in(y_depth)
         return y

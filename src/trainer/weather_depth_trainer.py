@@ -98,15 +98,13 @@ class WeatherDepthTrainer:
         self.lambda_weather = 1.0
         
         # Adapt input layers
-        if cfg.pipeline.kwargs.use_filter:
+        if self.cfg.trainer.training_version == 'warmup':
             self._replace_unet_conv_in_with_filter()
-        else:
-            self._replace_unet_conv_in()
-
+        # self._replace_unet_conv_in_with_filter()
+        
         # Encode empty text prompt
         self.model.encode_empty_text()
         self.empty_text_embed = self.model.empty_text_embed.detach().clone().to(device)
-
         self.model.unet.enable_xformers_memory_efficient_attention()
 
         # Trainability
@@ -287,7 +285,7 @@ class WeatherDepthTrainer:
         elif ver == "adapter_only":
             if self.cfg.pipeline.kwargs.use_filter:
                 self._set_requires_grad(self.model.unet.conv_in, True)
-                self._set_requires_grad(self.model.unet.conv_in.new_conv_in, False)
+                # self._set_requires_grad(self.model.unet.conv_in.new_conv_in, False)
             logging.info(f"Using restoration module parameters training.")
         else:
             raise NotImplementedError(f"Unknown training_version: {ver}")
@@ -988,16 +986,16 @@ class WeatherDepthTrainer:
     def save_checkpoint(self, ckpt_name, save_train_state):
         ckpt_dir = os.path.join(self.out_dir_ckpt, ckpt_name)
         logging.info(f"Saving checkpoint to: {ckpt_dir}")
-        # Backup previous checkpoint
-        temp_ckpt_dir = None
-        if os.path.exists(ckpt_dir) and os.path.isdir(ckpt_dir):
-            temp_ckpt_dir = os.path.join(
-                os.path.dirname(ckpt_dir), f"_old_{os.path.basename(ckpt_dir)}"
-            )
-            if os.path.exists(temp_ckpt_dir):
-                shutil.rmtree(temp_ckpt_dir, ignore_errors=True)
-            os.rename(ckpt_dir, temp_ckpt_dir)
-            logging.debug(f"Old checkpoint is backed up at: {temp_ckpt_dir}")
+        # # Backup previous checkpoint
+        # temp_ckpt_dir = None
+        # if os.path.exists(ckpt_dir) and os.path.isdir(ckpt_dir):
+        #     temp_ckpt_dir = os.path.join(
+        #         os.path.dirname(ckpt_dir), f"_old_{os.path.basename(ckpt_dir)}"
+        #     )
+        #     if os.path.exists(temp_ckpt_dir):
+        #         shutil.rmtree(temp_ckpt_dir, ignore_errors=True)
+        #     os.rename(ckpt_dir, temp_ckpt_dir)
+        #     logging.debug(f"Old checkpoint is backed up at: {temp_ckpt_dir}")
 
         # Save UNet
         unet_path = os.path.join(ckpt_dir, "unet")
@@ -1035,10 +1033,10 @@ class WeatherDepthTrainer:
 
             logging.info(f"Trainer state is saved to: {train_state_path}")
 
-        # Remove temp ckpt
-        if temp_ckpt_dir is not None and os.path.exists(temp_ckpt_dir):
-            shutil.rmtree(temp_ckpt_dir, ignore_errors=True)
-            logging.debug("Old checkpoint backup is removed.")
+        # # Remove temp ckpt
+        # if temp_ckpt_dir is not None and os.path.exists(temp_ckpt_dir):
+        #     shutil.rmtree(temp_ckpt_dir, ignore_errors=True)
+        #     logging.debug("Old checkpoint backup is removed.")
 
     def load_checkpoint(
         self, ckpt_path, load_trainer_state=True, resume_lr_scheduler=True
@@ -1082,7 +1080,7 @@ class WeatherDepthTrainer:
 
         # Load training states
         if load_trainer_state:
-            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"), weights_only=True)
+            checkpoint = torch.load(os.path.join(ckpt_path, "trainer.ckpt"))
             self.effective_iter = checkpoint["effective_iter"]
             self.epoch = checkpoint["epoch"]
             self.n_batch_in_epoch = checkpoint["n_batch_in_epoch"]
